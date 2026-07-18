@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0"><head><title>Article feeds</title></head><body>
+  <outline text="System Design">
+    <outline text="ByteByteGo" title="ByteByteGo" type="rss" xmlUrl="https://blog.bytebytego.com/feed"/>
+    <outline text="The Morning Paper" title="The Morning Paper" type="rss" xmlUrl="https://blog.acolyer.org/feed/"/>
+    <outline text="Architecture Notes" title="Architecture Notes" type="rss" xmlUrl="https://architecturenotes.co/feed/"/>
+  </outline>
+  <outline text="Algorithms and Data Structures">
+    <outline text="Eli Bendersky" title="Eli Bendersky" type="rss" xmlUrl="https://eli.thegreenplace.net/feeds/all.atom.xml"/>
+    <outline text="Jeremy Kun" title="Jeremy Kun" type="rss" xmlUrl="https://www.jeremykun.com/feed/"/>
+    <outline text="Daniel Lemire" title="Daniel Lemire" type="rss" xmlUrl="https://lemire.me/blog/feed/"/>
+  </outline>
+  <outline text="Psychology / ADHD">
+    <outline text="CHADD" title="CHADD" type="rss" xmlUrl="https://chadd.org/feed/"/>
+    <outline text="ADDA" title="ADDA" type="rss" xmlUrl="https://add.org/feed/"/>
+    <outline text="ADHD Europe" title="ADHD Europe" type="rss" xmlUrl="https://www.adhdeurope.eu/feed/"/>
+    <outline text="ADDitude" title="ADDitude" type="rss" xmlUrl="https://www.additudemag.com/feed/"/>
+  </outline>
+</body></opml>
