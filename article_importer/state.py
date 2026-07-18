@@ -214,6 +214,20 @@ class StateStore:
         ).fetchone()
         return row[0] if row is not None and isinstance(row[0], str) else None
 
+    def update_output_path(self, previous_path: str, output_path: str) -> None:
+        """Update imported-note paths after an external vault move."""
+        connection = self._mutable_connection()
+        connection.execute("BEGIN")
+        try:
+            connection.execute(
+                "UPDATE entries SET output_path = ? WHERE output_path = ?",
+                (output_path, previous_path),
+            )
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+
     def _dry_run_candidates(
         self,
         subscription: FeedSubscription,
