@@ -205,6 +205,15 @@ class StateStore:
             error_message=error,
         )
 
+    def imported_output_path(self, article_url: str) -> str | None:
+        """Return a successful output path for an article URL from any feed."""
+        connection = self._mutable_connection()
+        row = connection.execute(
+            "SELECT output_path FROM entries WHERE article_url = ? AND status = 'imported' LIMIT 1",
+            (article_url,),
+        ).fetchone()
+        return row[0] if row is not None and isinstance(row[0], str) else None
+
     def _dry_run_candidates(
         self,
         subscription: FeedSubscription,

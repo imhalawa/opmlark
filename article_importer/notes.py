@@ -104,15 +104,23 @@ def create_note(articles_path: Path, frontmatter: str, markdown: str) -> Path:
 
 
 def find_note_for_source(articles_path: Path, source_url: str) -> Path | None:
-    """Find an existing importer-created note for *source_url*, if one exists."""
+    """Find any existing article note whose frontmatter has *source_url*."""
     source_line = f"source: {_yaml_scalar(source_url)}"
-    marker = "ingested_by: opml-defuddle-articles"
+    unquoted_source_line = f"source: {source_url}"
     for path in articles_path.glob("*.md"):
         try:
             contents = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        if source_line in contents and marker in contents:
+        opening = _FRONTMATTER_OPENING.match(contents)
+        closing = _FRONTMATTER_CLOSING.search(contents, opening.end()) if opening else None
+        if closing is None:
+            continue
+        frontmatter = contents[opening.end() : closing.start()]
+        if any(
+            line.strip() in {source_line, unquoted_source_line}
+            for line in frontmatter.splitlines()
+        ):
             return path
     return None
 

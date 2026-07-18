@@ -2,6 +2,8 @@
 <opml version="2.0"><head><title>Article feeds</title></head><body>
   <outline text="System Design">
     <outline text="ByteByteGo" title="ByteByteGo" type="rss" xmlUrl="https://blog.bytebytego.com/feed"/>
+    <outline text="High Scalability" title="High Scalability" type="rss" xmlUrl="https://highscalability.com/rss/"/>
+    <outline text="Martin Kleppmann" title="Martin Kleppmann" type="rss" xmlUrl="https://feeds.feedburner.com/martinkl"/>
     <outline text="The Morning Paper" title="The Morning Paper" type="rss" xmlUrl="https://blog.acolyer.org/feed/"/>
     <outline text="Architecture Notes" title="Architecture Notes" type="rss" xmlUrl="https://architecturenotes.co/feed/"/>
   </outline>
