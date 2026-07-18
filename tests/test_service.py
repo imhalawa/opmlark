@@ -5,6 +5,7 @@ import importlib.util
 from datetime import datetime, timezone
 from email.utils import format_datetime
 from io import StringIO
+import logging
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -40,6 +41,7 @@ class ImportServiceTests(unittest.TestCase):
         subscriptions: list[FeedSubscription],
         *,
         progress: object | None = None,
+        logger: logging.Logger | None = None,
     ) -> ImportService:
         config = ImporterConfig(
             vault_path=self.articles.parents[2],
@@ -54,6 +56,7 @@ class ImportServiceTests(unittest.TestCase):
             fetch_bytes=self.fetcher,
             defuddle=self.defuddle,
             progress=progress,
+            logger=logger,
         )
 
     def test_first_run_seeds_without_defuddle(self) -> None:
@@ -86,6 +89,17 @@ class ImportServiceTests(unittest.TestCase):
         self.assertIn("[1/1] Fetching Example", events)
         self.assertIn("Defuddling: https://example.test/new", events)
         self.assertIn("Imported: An article", events)
+
+    def test_records_progress_events_in_the_logger(self) -> None:
+        log_output = StringIO()
+        logger = logging.Logger("test.import-progress", level=logging.INFO)
+        logger.addHandler(logging.StreamHandler(log_output))
+        self.service = self._service([GOOD_FEED], logger=logger)
+
+        self.service.run(dry_run=False)
+
+        self.assertIn("Starting import: 1 feeds, 90-day lookback", log_output.getvalue())
+        self.assertIn("[1/1] Fetching Example", log_output.getvalue())
 
     def test_bad_feed_does_not_prevent_other_feed(self) -> None:
         self.fetcher.side_effect = lambda url: (

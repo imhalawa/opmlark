@@ -53,12 +53,12 @@ class ImportService:
         observed_at = datetime.now(timezone.utc)
         cutoff = observed_at - timedelta(days=self._config.lookback_days)
         total_subscriptions = len(self._subscriptions)
-        self._progress(
+        self._report_progress(
             f"Starting import: {total_subscriptions} feeds, {self._config.lookback_days}-day lookback"
         )
         with StateStore(self._state_path) as state:
             for index, subscription in enumerate(self._subscriptions, start=1):
-                self._progress(f"[{index}/{total_subscriptions}] Fetching {subscription.name}")
+                self._report_progress(f"[{index}/{total_subscriptions}] Fetching {subscription.name}")
                 try:
                     entries = parse_feed(self._fetch_bytes(subscription.feed_url), subscription)
                     batch = state.candidates(
@@ -70,7 +70,7 @@ class ImportService:
                     )
                 except Exception as error:
                     self._logger.error("Failed feed %s: %s", subscription.feed_url, error)
-                    self._progress(f"Failed feed: {subscription.name}: {error}")
+                    self._report_progress(f"Failed feed: {subscription.name}: {error}")
                     summary = _with(summary, failed_feeds=summary.failed_feeds + 1)
                     continue
 
@@ -92,10 +92,10 @@ class ImportService:
                                 state.mark_imported(
                                     entry.subscription.feed_url, entry.url, str(note)
                                 )
-                                self._progress(f"Recovered existing note: {entry.url}")
+                                self._report_progress(f"Recovered existing note: {entry.url}")
                                 continue
                         state.begin_note_write(entry.subscription.feed_url, entry.url)
-                        self._progress(f"Defuddling: {entry.url}")
+                        self._report_progress(f"Defuddling: {entry.url}")
                         article = self._defuddle(entry.url, self._config.defuddle_executable)
                         note = create_note(
                             self._config.articles_path,
@@ -117,14 +117,18 @@ class ImportService:
                                     state_error,
                                 )
                         self._logger.error("Failed article %s: %s", entry.url, error)
-                        self._progress(f"Failed: {entry.url}: {error}")
+                        self._report_progress(f"Failed: {entry.url}: {error}")
                         summary = _with(
                             summary, failed_entries=summary.failed_entries + 1
                         )
                     else:
-                        self._progress(f"Imported: {article.title or entry.url}")
+                        self._report_progress(f"Imported: {article.title or entry.url}")
                         summary = _with(summary, imported=summary.imported + 1)
         return summary
+
+    def _report_progress(self, message: str) -> None:
+        self._logger.info(message)
+        self._progress(message)
 
 
 def fetch_feed_bytes(url: str) -> bytes:
