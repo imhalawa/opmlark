@@ -231,6 +231,25 @@ class FetchArticlesCliTests(unittest.TestCase):
         self.assertEqual(1, exit_code)
         self.assertIn("cannot be combined", output.getvalue())
 
+    def test_cli_add_topics_migrates_legacy_notes_without_importing(self) -> None:
+        migration = Mock(return_value=3)
+        output = StringIO()
+
+        with (
+            patch.object(self.script, "load_config", return_value=self.config),
+            patch.object(self.script, "add_topics_to_legacy_articles", migration),
+            patch.object(self.script, "parse_opml") as parse_opml,
+            patch.object(self.script, "ImportService") as service,
+            contextlib.redirect_stdout(output),
+        ):
+            exit_code = self.script.main(["--add-topics"])
+
+        self.assertEqual(0, exit_code)
+        migration.assert_called_once_with(self.articles)
+        parse_opml.assert_not_called()
+        service.assert_not_called()
+        self.assertEqual("updated=3\n", output.getvalue())
+
 
 def _load_fetch_articles() -> object:
     script_path = Path(__file__).parents[1] / "fetch_articles.py"

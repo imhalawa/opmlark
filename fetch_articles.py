@@ -6,7 +6,7 @@ from pathlib import Path
 import xml.etree.ElementTree as ElementTree
 
 from article_importer.configuration import ConfigurationError, load_config
-from article_importer.notes import add_article_type_to_imported_notes
+from article_importer.notes import add_article_type_to_imported_notes, add_topics_to_legacy_articles
 from article_importer.parsing import parse_opml
 from article_importer.service import ImportService, RunSummary
 
@@ -24,9 +24,18 @@ def main(arguments: list[str] | None = None) -> int:
         action="store_true",
         help="Add type: article to existing importer-created notes",
     )
+    parser.add_argument(
+        "--add-topics",
+        action="store_true",
+        help="Add inferred topics to existing non-importer article notes",
+    )
     args = parser.parse_args(arguments)
-    if args.dry_run and args.add_article_type:
-        print("ERROR: --dry-run and --add-article-type cannot be combined")
+    migrations = args.add_article_type or args.add_topics
+    if args.dry_run and migrations:
+        print("ERROR: --dry-run cannot be combined with a frontmatter migration")
+        return 1
+    if args.add_article_type and args.add_topics:
+        print("ERROR: --add-article-type and --add-topics cannot be combined")
         return 1
 
     project_root = Path(__file__).resolve().parent
@@ -35,6 +44,15 @@ def main(arguments: list[str] | None = None) -> int:
         try:
             config = load_config(config_path)
             updated = add_article_type_to_imported_notes(config.articles_path)
+        except (ConfigurationError, OSError) as error:
+            print(f"ERROR: {error}")
+            return 1
+        print(f"updated={updated}")
+        return 0
+    if args.add_topics:
+        try:
+            config = load_config(config_path)
+            updated = add_topics_to_legacy_articles(config.articles_path)
         except (ConfigurationError, OSError) as error:
             print(f"ERROR: {error}")
             return 1
