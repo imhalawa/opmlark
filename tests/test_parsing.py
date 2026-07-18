@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from article_importer.configuration import ConfigurationError, load_config
 from article_importer.models import FeedSubscription
@@ -99,7 +100,7 @@ class ParsingTests(unittest.TestCase):
         articles.mkdir(parents=True)
         config = self.temp / "config.toml"
         config.write_text(
-            '[importer]\nvault_path = "vault"\ndefuddle_executable = "tools/defuddle.exe"\n',
+            '[importer]\nvault_path = "vault"\ndefuddle_executable = "tools/defuddle.exe"\nlookback_days = 90\n',
             encoding="utf-8",
         )
 
@@ -109,18 +110,42 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual(articles, loaded.articles_path)
         self.assertEqual(str(self.temp / "tools" / "defuddle.exe"), loaded.defuddle_executable)
 
-    def test_config_keeps_bare_executable_for_path_resolution(self) -> None:
+    @patch("article_importer.configuration.shutil.which")
+    def test_config_resolves_bare_executable_from_path(self, which: object) -> None:
+        which.return_value = "C:/tools/defuddle.cmd"
         vault = self.temp / "vault"
         (vault / "Sources" / "Articles").mkdir(parents=True)
         config = self.temp / "config.toml"
         config.write_text(
-            '[importer]\nvault_path = "vault"\ndefuddle_executable = "defuddle"\n',
+            '[importer]\nvault_path = "vault"\ndefuddle_executable = "defuddle"\nlookback_days = 90\n',
             encoding="utf-8",
         )
 
         loaded = load_config(config)
 
-        self.assertEqual("defuddle", loaded.defuddle_executable)
+        self.assertEqual("C:/tools/defuddle.cmd", loaded.defuddle_executable)
+
+    def test_config_reads_positive_lookback_days(self) -> None:
+        vault = self.temp / "vault"
+        (vault / "Sources" / "Articles").mkdir(parents=True)
+        config = self.temp / "config.toml"
+        config.write_text(
+            '[importer]\nvault_path = "vault"\nlookback_days = 90\n',
+            encoding="utf-8",
+        )
+
+        loaded = load_config(config)
+
+        self.assertEqual(90, loaded.lookback_days)
+
+    def test_config_requires_lookback_days(self) -> None:
+        vault = self.temp / "vault"
+        (vault / "Sources" / "Articles").mkdir(parents=True)
+        config = self.temp / "config.toml"
+        config.write_text('[importer]\nvault_path = "vault"\n', encoding="utf-8")
+
+        with self.assertRaisesRegex(ConfigurationError, "lookback_days"):
+            load_config(config)
 
 
 if __name__ == "__main__":

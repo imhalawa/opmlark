@@ -1,3 +1,4 @@
 [importer]
 vault_path = "C:/Users/imhal/Documents/Traces"
 defuddle_executable = "defuddle"
+lookback_days = 90

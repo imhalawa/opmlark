@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -18,3 +19,4 @@ class FeedEntry:
     url: str
     published: datetime | None
     subscription: FeedSubscription
+    publication_date_source: Literal["feed", "observed"] = "feed"

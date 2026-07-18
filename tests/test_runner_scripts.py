@@ -11,6 +11,12 @@ PROJECT_ROOT = Path(__file__).parents[1]
 
 
 class RunnerScriptTests(unittest.TestCase):
+    def test_runner_adds_the_standard_npm_bin_for_defuddle(self) -> None:
+        contents = (PROJECT_ROOT / "run-import.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("$env:APPDATA", contents)
+        self.assertIn("defuddle.cmd", contents)
+
     def test_runner_forwards_arguments_and_python_exit_code(self) -> None:
         runner = PROJECT_ROOT / "run-import.ps1"
         self.assertTrue(runner.exists(), "The project runner must exist")
@@ -64,7 +70,8 @@ class ReadmeTests(unittest.TestCase):
             "config.toml",
             "feeds.opml",
             "outline",
-            "no-backfill",
+            "lookback_days",
+            "publication_date_source",
             "--dry-run",
             "run-import.ps1",
             "install-scheduled-task.ps1",

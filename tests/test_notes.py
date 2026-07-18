@@ -48,6 +48,89 @@ class NotesTests(unittest.TestCase):
             run.call_args.kwargs,
         )
 
+    @patch("article_importer.defuddle.subprocess.run")
+    @patch("shutil.which", return_value="C:/tools/node.exe")
+    def test_defuddle_cmd_shim_uses_node_without_a_batch_shell(
+        self, which: Mock, run: Mock
+    ) -> None:
+        run.return_value = CompletedProcess(
+            [],
+            0,
+            json.dumps({"title": "A title", "content": "body"}),
+            "",
+        )
+        shim = self.articles / "defuddle.cmd"
+        cli = shim.parent / "node_modules" / "defuddle" / "dist" / "cli.js"
+        cli.parent.mkdir(parents=True)
+        cli.touch()
+
+        run_defuddle("https://example.test/article?tag=a&tag=b", str(shim))
+
+        self.assertEqual(
+            [
+                "C:/tools/node.exe",
+                str(cli),
+                "parse",
+                "https://example.test/article?tag=a&tag=b",
+                "--json",
+                "--md",
+            ],
+            run.call_args.args[0],
+        )
+        which.assert_called_once_with("node")
+
+    @patch("article_importer.defuddle.subprocess.run")
+    @patch("shutil.which", return_value="C:/tools/node.exe")
+    def test_defuddle_local_cmd_shim_finds_its_package_cli(self, which: Mock, run: Mock) -> None:
+        run.return_value = CompletedProcess(
+            [],
+            0,
+            json.dumps({"title": "A title", "content": "body"}),
+            "",
+        )
+        shim = self.articles / "node_modules" / ".bin" / "defuddle.cmd"
+        cli = self.articles / "node_modules" / "defuddle" / "dist" / "cli.js"
+        cli.parent.mkdir(parents=True)
+        cli.touch()
+
+        run_defuddle("https://example.test/article", str(shim))
+
+        self.assertEqual(
+            [
+                "C:/tools/node.exe",
+                str(cli),
+                "parse",
+                "https://example.test/article",
+                "--json",
+                "--md",
+            ],
+            run.call_args.args[0],
+        )
+        which.assert_called_once_with("node")
+
+    @patch("article_importer.defuddle.subprocess.run")
+    @patch("shutil.which", return_value="C:/tools/node.exe")
+    def test_defuddle_cmd_shim_prefers_a_sibling_node_runtime(
+        self, which: Mock, run: Mock
+    ) -> None:
+        run.return_value = CompletedProcess(
+            [],
+            0,
+            json.dumps({"title": "A title", "content": "body"}),
+            "",
+        )
+        shim = self.articles / "defuddle.cmd"
+        node = shim.with_name("node.exe")
+        cli = shim.parent / "node_modules" / "defuddle" / "dist" / "cli.js"
+        cli.parent.mkdir(parents=True)
+        cli.touch()
+        node.touch()
+
+        run_defuddle("https://example.test/article", str(shim))
+
+        self.assertEqual(str(node), run.call_args.args[0][0])
+        which.assert_not_called()
+
     def test_note_has_marker_and_unchanged_body(self) -> None:
         body = "## Original\n\nunchanged\n"
 
@@ -63,6 +146,7 @@ class NotesTests(unittest.TestCase):
             'feed: "Publisher"\n'
             'topic: "System Design"\n'
             'published: "2026-07-18T07:00:00+00:00"\n'
+            'publication_date_source: "feed"\n'
             'imported: "2026-07-18T07:00:00+00:00"\n'
             'author: "Ada Lovelace"\n'
             "ingested_by: opml-defuddle-articles\n"
@@ -83,6 +167,19 @@ class NotesTests(unittest.TestCase):
         self.assertEqual("Article - A title.md", first.name)
         self.assertEqual("Article - A title (2).md", second.name)
         self.assertEqual("Article - A title (3).md", third.name)
+
+    def test_observed_date_provenance_is_written_to_frontmatter(self) -> None:
+        observed_entry = FeedEntry(
+            "Undated feed title",
+            "https://example.test/undated",
+            NOW,
+            SUBSCRIPTION,
+            "observed",
+        )
+
+        frontmatter = build_frontmatter(ARTICLE, observed_entry, NOW)
+
+        self.assertIn('publication_date_source: "observed"', frontmatter)
 
     def test_note_name_sanitizes_windows_reserved_and_control_characters(self) -> None:
         article = DefuddledArticle('Bad<>:"/\\|?*\x00 title', None, "body")

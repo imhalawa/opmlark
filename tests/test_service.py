@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import contextlib
 import importlib.util
+from datetime import datetime, timezone
+from email.utils import format_datetime
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -38,6 +40,7 @@ class ImportServiceTests(unittest.TestCase):
             vault_path=self.articles.parents[2],
             articles_path=self.articles,
             defuddle_executable="defuddle",
+            lookback_days=90,
         )
         return ImportService(
             config,
@@ -56,7 +59,7 @@ class ImportServiceTests(unittest.TestCase):
 
     def test_later_new_entry_is_imported_and_marked(self) -> None:
         self.service.run(dry_run=False)
-        self.fetcher.return_value = RSS_WITH_NEW_ENTRY
+        self.fetcher.return_value = _with_recent_entries(RSS_WITH_NEW_ENTRY)
 
         summary = self.service.run(dry_run=False)
 
@@ -77,7 +80,7 @@ class ImportServiceTests(unittest.TestCase):
 
     def test_failed_entry_is_recorded_and_later_retried(self) -> None:
         self.service.run(dry_run=False)
-        self.fetcher.return_value = RSS_WITH_NEW_ENTRY
+        self.fetcher.return_value = _with_recent_entries(RSS_WITH_NEW_ENTRY)
         self.defuddle.side_effect = RuntimeError("Defuddle unavailable")
 
         failed = self.service.run(dry_run=False)
@@ -97,10 +100,10 @@ class ImportServiceTests(unittest.TestCase):
 
     def test_dry_run_reports_post_baseline_imports_and_retries_without_writes(self) -> None:
         self.service.run(dry_run=False)
-        self.fetcher.return_value = RSS_WITH_NEW_ENTRY
+        self.fetcher.return_value = _with_recent_entries(RSS_WITH_NEW_ENTRY)
         self.defuddle.side_effect = RuntimeError("Defuddle unavailable")
         self.service.run(dry_run=False)
-        self.fetcher.return_value = RSS_WITH_NEW_AND_RETRY_ENTRY
+        self.fetcher.return_value = _with_recent_entries(RSS_WITH_NEW_AND_RETRY_ENTRY)
         database = self.articles.parents[2] / "data" / "articles.sqlite3"
         before_database = database.read_bytes()
         calls_before_preview = self.defuddle.call_count
@@ -116,7 +119,7 @@ class ImportServiceTests(unittest.TestCase):
 
     def test_state_failure_after_note_creation_recovers_without_duplicate_note(self) -> None:
         self.service.run(dry_run=False)
-        self.fetcher.return_value = RSS_WITH_NEW_ENTRY
+        self.fetcher.return_value = _with_recent_entries(RSS_WITH_NEW_ENTRY)
 
         with patch(
             "article_importer.service.StateStore.mark_imported",
@@ -209,3 +212,10 @@ def _load_fetch_articles() -> object:
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
     return module
+
+
+def _with_recent_entries(feed: bytes) -> bytes:
+    timestamp = format_datetime(datetime.now(timezone.utc)).encode("ascii")
+    return feed.replace(b"Wed, 02 Jul 2025 12:00:00 +0000", timestamp).replace(
+        b"Thu, 03 Jul 2025 12:00:00 +0000", timestamp
+    )
