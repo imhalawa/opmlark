@@ -1,8 +1,36 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<opml version="2.0"><head><title>Psychology</title></head><body>
-  <outline text="Psychology">
-    <outline text="ADHD"><outline id="chadd" text="CHADD" title="CHADD" xmlUrl="https://chadd.org/feed/" htmlUrl="https://chadd.org/"/><outline id="adda" text="ADDA" title="ADDA" xmlUrl="https://add.org/feed/" htmlUrl="https://add.org/"/><outline id="adhd-europe" text="ADHD Europe" title="ADHD Europe" xmlUrl="https://www.adhdeurope.eu/feed/" htmlUrl="https://www.adhdeurope.eu/"/><outline id="additude" text="ADDitude" title="ADDitude" xmlUrl="https://www.additudemag.com/feed/" htmlUrl="https://www.additudemag.com/"/></outline>
-    <outline text="Memory, Focus, and Time Management"><outline id="learning-scientists" text="The Learning Scientists" title="The Learning Scientists" xmlUrl="https://www.learningscientists.org/blog?format=rss" htmlUrl="https://www.learningscientists.org/blog"/><outline id="james-clear" text="James Clear" title="James Clear" xmlUrl="https://jamesclear.com/feed" htmlUrl="https://jamesclear.com/"/><outline id="ness-labs" text="Ness Labs" title="Ness Labs" xmlUrl="https://nesslabs.com/feed" htmlUrl="https://nesslabs.com/"/></outline>
-    <outline text="Anxiety, Stress, and Sleep"><outline id="mindful" text="Mindful" title="Mindful" xmlUrl="https://www.mindful.org/feed/" htmlUrl="https://www.mindful.org/"/><outline id="sleep-foundation" text="Sleep Foundation" title="Sleep Foundation" xmlUrl="https://www.sleepfoundation.org/feed" htmlUrl="https://www.sleepfoundation.org/"/></outline>
-  </outline>
-</body></opml>
+<opml version="2.0">
+  <head>
+    <title>Psychology</title>
+  </head>
+  <body>
+    <outline text="Psychology">
+      <outline text="ADHD">
+        <outline id="chadd" text="CHADD" title="CHADD" xmlUrl="https://chadd.org/feed/"
+          htmlUrl="https://chadd.org/" />
+        <outline id="adda" text="ADDA" title="ADDA" xmlUrl="https://add.org/feed/"
+          htmlUrl="https://add.org/" />
+        <outline id="adhd-europe" text="ADHD Europe" title="ADHD Europe"
+          xmlUrl="https://www.adhdeurope.eu/feed/" htmlUrl="https://www.adhdeurope.eu/" />
+        <outline id="additude" text="ADDitude" title="ADDitude"
+          xmlUrl="https://www.additudemag.com/feed/" htmlUrl="https://www.additudemag.com/" />
+      </outline>
+      <outline text="Memory, Focus, and Time Management">
+        <outline id="learning-scientists" text="The Learning Scientists"
+          title="The Learning Scientists"
+          xmlUrl="https://www.learningscientists.org/blog?format=rss"
+          htmlUrl="https://www.learningscientists.org/blog" />
+        <outline id="james-clear" text="James Clear" title="James Clear"
+          xmlUrl="https://jamesclear.com/feed" htmlUrl="https://jamesclear.com/" />
+        <outline id="ness-labs" text="Ness Labs" title="Ness Labs"
+          xmlUrl="https://nesslabs.com/feed" htmlUrl="https://nesslabs.com/" />
+      </outline>
+      <outline text="Anxiety, Stress, and Sleep">
+        <outline id="mindful" text="Mindful" title="Mindful" xmlUrl="https://www.mindful.org/feed/"
+          htmlUrl="https://www.mindful.org/" />
+        <outline id="sleep-foundation" text="Sleep Foundation" title="Sleep Foundation"
+          xmlUrl="https://www.sleepfoundation.org/feed" htmlUrl="https://www.sleepfoundation.org/" />
+      </outline>
+    </outline>
+  </body>
+</opml>
