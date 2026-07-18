@@ -2,3 +2,62 @@
 vault_path = "C:/Users/imhal/Documents/Traces"
 defuddle_executable = "defuddle"
 lookback_days = 90
+
+[feed_catalog]
+disabled_catalogs = []
+disabled_sources = []
+
+[[feed_catalogs]]
+id = "system-design"
+path = "feeds/system-design.opml"
+folder = "Engineering/System Design"
+
+[[feed_catalogs]]
+id = "architecture-microservices"
+path = "feeds/architecture-microservices.opml"
+folder = "Engineering/Architecture"
+
+[[feed_catalogs]]
+id = "algorithms-problem-solving"
+path = "feeds/algorithms-problem-solving.opml"
+folder = "Engineering/Algorithms"
+
+[[feed_catalogs]]
+id = "interviews"
+path = "feeds/interviews.opml"
+folder = "Career/Interviews"
+
+[[feed_catalogs]]
+id = "observability"
+path = "feeds/observability.opml"
+folder = "Engineering/Observability"
+
+[[feed_catalogs]]
+id = "company-engineering"
+path = "feeds/company-engineering.opml"
+folder = "Company Engineering"
+
+[[feed_catalogs]]
+id = "career"
+path = "feeds/career.opml"
+folder = "Career"
+
+[[feed_catalogs]]
+id = "psychology"
+path = "feeds/psychology.opml"
+folder = "Psychology"
+
+[[feed_catalogs]]
+id = "philosophy"
+path = "feeds/philosophy.opml"
+folder = "Philosophy"
+
+[[feed_catalogs]]
+id = "neuroscience"
+path = "feeds/neuroscience.opml"
+folder = "Psychology/Neuroscience"
+
+[[feed_catalogs]]
+id = "calisthenics"
+path = "feeds/calisthenics.opml"
+folder = "Health/Calisthenics"

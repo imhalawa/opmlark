@@ -11,7 +11,7 @@ from article_importer.notes import (
     add_topics_to_legacy_articles,
     group_articles_by_source,
 )
-from article_importer.parsing import parse_opml
+from article_importer.parsing import CatalogError, parse_catalogs, validate_catalogs
 from article_importer.service import ImportService, RunSummary
 
 
@@ -38,6 +38,11 @@ def main(arguments: list[str] | None = None) -> int:
         action="store_true",
         help="Move root-level article notes into source-named folders",
     )
+    parser.add_argument(
+        "--validate-catalogs",
+        action="store_true",
+        help="Verify enabled feed endpoints without importing articles",
+    )
     args = parser.parse_args(arguments)
     migrations = args.add_article_type or args.add_topics or args.group_by_source
     if args.dry_run and migrations:
@@ -45,6 +50,9 @@ def main(arguments: list[str] | None = None) -> int:
         return 1
     if sum((args.add_article_type, args.add_topics, args.group_by_source)) > 1:
         print("ERROR: frontmatter and article organization migrations cannot be combined")
+        return 1
+    if args.validate_catalogs and migrations:
+        print("ERROR: --validate-catalogs cannot be combined with a migration")
         return 1
 
     project_root = Path(__file__).resolve().parent
@@ -78,6 +86,19 @@ def main(arguments: list[str] | None = None) -> int:
             return 1
         print(f"moved={moved}")
         return 0
+    if args.validate_catalogs:
+        try:
+            config = load_config(config_path)
+            validation = validate_catalogs(
+                config.feed_catalogs, disabled_sources=config.disabled_sources
+            )
+        except (CatalogError, ConfigurationError, OSError, ElementTree.ParseError) as error:
+            print(f"ERROR: {error}")
+            return 1
+        print(f"validated={validation.checked} failed={len(validation.errors)}")
+        for error in validation.errors:
+            print(f"ERROR: {error}")
+        return 1 if validation.errors else 0
 
     data_path = project_root / "data"
     if args.dry_run:
@@ -87,7 +108,9 @@ def main(arguments: list[str] | None = None) -> int:
         logger = _configure_logger(data_path / "importer.log")
     try:
         config = load_config(config_path)
-        subscriptions = parse_opml(project_root / "feeds.opml")
+        subscriptions = parse_catalogs(
+            config.feed_catalogs, disabled_sources=config.disabled_sources
+        )
         service = ImportService(
             config,
             subscriptions,
@@ -95,7 +118,7 @@ def main(arguments: list[str] | None = None) -> int:
             logger=logger,
         )
         summary = service.run(dry_run=args.dry_run)
-    except (ConfigurationError, OSError, ElementTree.ParseError) as error:
+    except (CatalogError, ConfigurationError, OSError, ElementTree.ParseError) as error:
         logger.error("Article import failed: %s", error)
         print(f"ERROR: {error}")
         return 1

@@ -1,42 +1,143 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import urljoin
+from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ElementTree
 
+from article_importer.configuration import FeedCatalog
 from article_importer.models import FeedEntry, FeedSubscription
 
 
-def parse_opml(path: Path) -> list[FeedSubscription]:
-    """Read feed subscriptions from immediate OPML topic outlines."""
+class CatalogError(ValueError):
+    """Raised when an enabled OPML catalog cannot be used safely."""
+
+
+@dataclass(frozen=True)
+class CatalogValidation:
+    checked: int
+    errors: tuple[str, ...] = ()
+
+
+def parse_catalogs(
+    catalogs: tuple[FeedCatalog, ...], *, disabled_sources: frozenset[str] = frozenset()
+) -> list[FeedSubscription]:
+    """Read enabled OPML catalogs and reject duplicate source identifiers."""
+    subscriptions: list[FeedSubscription] = []
+    source_ids: set[str] = set()
+    for catalog in catalogs:
+        if not catalog.enabled:
+            continue
+        for subscription in parse_opml(
+            catalog.path,
+            catalog_folder=catalog.folder,
+            disabled_sources=disabled_sources,
+        ):
+            source_id = subscription.source_id
+            if source_id in source_ids:
+                raise CatalogError(f"duplicate enabled source id: {source_id}")
+            source_ids.add(source_id)
+            subscriptions.append(subscription)
+    return subscriptions
+
+
+def parse_opml(
+    path: Path,
+    *,
+    catalog_folder: str | None = None,
+    disabled_sources: frozenset[str] = frozenset(),
+) -> list[FeedSubscription]:
+    """Read enabled feed subscriptions from an OPML catalog."""
     root = ElementTree.parse(path).getroot()
     body = next((child for child in root if _local_name(child.tag) == "body"), None)
     if body is None:
         return []
 
     subscriptions: list[FeedSubscription] = []
-    for topic_outline in body:
-        if _local_name(topic_outline.tag) != "outline":
-            continue
-        topic = topic_outline.get("text", "")
-        for feed_outline in topic_outline:
-            if _local_name(feed_outline.tag) != "outline":
-                continue
-            feed_url = feed_outline.get("xmlUrl")
-            if not feed_url:
-                continue
-            name = feed_outline.get("title") or feed_outline.get("text", "")
-            subscriptions.append(
-                FeedSubscription(
-                    topic=topic,
-                    name=name,
-                    feed_url=feed_url,
-                    home_url=feed_outline.get("htmlUrl"),
-                )
+    for outline in body:
+        if _local_name(outline.tag) == "outline":
+            _read_outline(
+                outline,
+                "",
+                subscriptions,
+                catalog_folder=catalog_folder,
+                disabled_sources=disabled_sources,
             )
     return subscriptions
+
+
+def validate_catalogs(
+    catalogs: tuple[FeedCatalog, ...],
+    *,
+    disabled_sources: frozenset[str] = frozenset(),
+) -> CatalogValidation:
+    """Verify every enabled feed endpoint returns RSS or Atom XML."""
+    subscriptions = parse_catalogs(catalogs, disabled_sources=disabled_sources)
+    errors: list[str] = []
+    for subscription in subscriptions:
+        try:
+            xml = _fetch_feed_bytes(subscription.feed_url)
+            root = ElementTree.fromstring(xml)
+            if _local_name(root.tag) not in {"rss", "feed"}:
+                raise CatalogError("endpoint is not an RSS or Atom feed")
+            parse_feed(xml, subscription)
+        except Exception as error:
+            errors.append(f"{subscription.source_id} ({subscription.feed_url}): {error}")
+    return CatalogValidation(len(subscriptions), tuple(errors))
+
+
+def _fetch_feed_bytes(url: str) -> bytes:
+    request = Request(url, headers={"User-Agent": "opml-defuddle-articles/1.0"})
+    with urlopen(request, timeout=30) as response:
+        return response.read()
+
+
+def _read_outline(
+    outline: ElementTree.Element,
+    parent_topic: str,
+    subscriptions: list[FeedSubscription],
+    *,
+    catalog_folder: str | None,
+    disabled_sources: frozenset[str],
+) -> None:
+    if not _is_enabled(outline):
+        return
+    feed_url = outline.get("xmlUrl")
+    if feed_url:
+        source_id = (outline.get("id") or "").strip()
+        if not source_id:
+            raise CatalogError(f"feed {feed_url} is missing a stable id")
+        if source_id in disabled_sources:
+            return
+        subscriptions.append(
+            FeedSubscription(
+                topic=parent_topic or "Uncategorized",
+                name=outline.get("title") or outline.get("text", ""),
+                feed_url=feed_url,
+                home_url=outline.get("htmlUrl"),
+                source_id=source_id,
+                folder=outline.get("folder") or catalog_folder,
+            )
+        )
+        return
+    title = (outline.get("text") or "").strip()
+    topic = " / ".join(part for part in (parent_topic, title) if part)
+    for child in outline:
+        if _local_name(child.tag) == "outline":
+            _read_outline(
+                child,
+                topic,
+                subscriptions,
+                catalog_folder=catalog_folder,
+                disabled_sources=disabled_sources,
+            )
+
+
+def _is_enabled(outline: ElementTree.Element) -> bool:
+    return outline.get("enabled", "true").strip().lower() not in {"false", "0", "no"}
 
 
 def parse_feed(xml: bytes, subscription: FeedSubscription) -> list[FeedEntry]:

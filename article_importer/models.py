@@ -11,6 +11,8 @@ class FeedSubscription:
     name: str
     feed_url: str
     home_url: str | None = None
+    source_id: str | None = None
+    folder: str | None = None
 
 
 @dataclass(frozen=True)

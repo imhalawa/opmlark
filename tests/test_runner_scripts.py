@@ -68,8 +68,10 @@ class ReadmeTests(unittest.TestCase):
         for required_text in (
             "Prerequisites",
             "config.toml",
-            "feeds.opml",
+            "feeds/",
             "outline",
+            "feed_catalogs",
+            "--validate-catalogs",
             "lookback_days",
             "publication_date_source",
             "--dry-run",

@@ -137,6 +137,7 @@ class ArchiveImportService:
                 self._config.articles_path,
                 build_frontmatter(article, entry, datetime.now(timezone.utc)),
                 article.markdown,
+                entry.subscription.folder,
             )
             state.mark_imported(entry.subscription.feed_url, entry.url, str(note))
         except Exception as error:

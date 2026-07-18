@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0"><head><title>Software Engineering Career</title></head><body>
+  <outline text="Software Engineering Career, Incidents, and Soft Skills">
+    <outline id="pragmatic-engineer" text="The Pragmatic Engineer" title="The Pragmatic Engineer" xmlUrl="https://newsletter.pragmaticengineer.com/feed" htmlUrl="https://newsletter.pragmaticengineer.com/"/>
+    <outline id="engineering-management" text="Engineering Management" title="Engineering Management" xmlUrl="https://newsletter.eng-leadership.com/feed" htmlUrl="https://newsletter.eng-leadership.com/"/>
+    <outline id="jvns" text="Julia Evans" title="Julia Evans" xmlUrl="https://jvns.ca/atom.xml" htmlUrl="https://jvns.ca/"/>
+    <outline id="charity-wtf" text="Charity Majors" title="Charity Majors" xmlUrl="https://charity.wtf/feed.xml" htmlUrl="https://charity.wtf/"/>
+  </outline>
+</body></opml>

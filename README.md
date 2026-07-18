@@ -1,6 +1,6 @@
 # OPML Defuddle Articles
 
-Imports articles newly published by the RSS and Atom feeds in `feeds.opml` into an Obsidian vault. Each imported note is processed by Defuddle and carries the marker `ingested_by: opml-defuddle-articles`.
+Imports articles newly published by the RSS and Atom feeds in the configured topic catalogs under `feeds/` into an Obsidian vault. Each imported note is processed by Defuddle and carries the marker `ingested_by: opml-defuddle-articles`.
 
 ## Prerequisites
 
@@ -22,7 +22,33 @@ Test-Path 'C:\Users\imhal\Documents\Traces\Sources\Articles'
 
 Edit `config.toml` to set `vault_path`, `lookback_days`, and, when necessary, `defuddle_executable`. Bare executable names (such as `defuddle`) resolve through `PATH`; explicit relative paths resolve from the configuration file's directory.
 
-Put your feed subscriptions in `feeds.opml`. Export or copy an OPML `outline` into its `<body>`; each feed outline needs an `xmlUrl`. A nested parent outline is used as the article topic, and its children become feed subscriptions.
+Each `[[feed_catalogs]]` item selects one OPML file, gives it a stable `id`, and can set a default `folder` below `Sources/Articles`. Set `enabled = false` on a catalog or add its id to `feed_catalog.disabled_catalogs` to skip it. `feed_catalog.disabled_sources` skips a source id across all catalogs.
+
+Each feed outline needs a stable `id` and `xmlUrl`. Set `enabled="false"` on an outline to skip only that source. A source-level `folder` overrides its catalog folder; otherwise the importer uses the catalog folder, then the feed/hostname fallback. Folders must be relative to `Sources/Articles` and cannot contain empty or traversal segments.
+
+Example:
+
+```toml
+[[feed_catalogs]]
+id = "company-engineering"
+path = "feeds/company-engineering.opml"
+folder = "Company Engineering"
+enabled = true
+```
+
+```xml
+<outline id="uber-engineering" text="Uber Engineering"
+         xmlUrl="https://example.com/feed.xml"
+         folder="Company Engineering/Uber" />
+```
+
+Verify every enabled endpoint before scheduling or after editing a catalog:
+
+```powershell
+& .\run-import.ps1 --validate-catalogs
+```
+
+Booking.com has a technical blog, but no public RSS/Atom endpoint was discoverable; Adyen and Mollie likewise have no verified technical feed endpoint. Uber Engineering publishes an RSS link but its endpoint currently rejects the importer's request. They are intentionally documented rather than enabled. The enabled Netherlands-focused sources are bol Techlab and Weaviate, whose public feeds validate successfully.
 
 ## Rolling three-month lookback
 

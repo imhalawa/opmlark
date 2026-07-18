@@ -88,16 +88,20 @@ def add_topics_to_legacy_articles(articles_path: Path) -> int:
     return updated
 
 
-def create_note(articles_path: Path, frontmatter: str, markdown: str) -> Path:
+def create_note(
+    articles_path: Path, frontmatter: str, markdown: str, folder: str | None = None
+) -> Path:
     """Write a note once, choosing a numbered name if the title already exists."""
     title = _safe_title(_frontmatter_title(frontmatter))
-    folder = articles_path / source_folder_for_note(frontmatter)
-    folder.mkdir(parents=True, exist_ok=True)
+    output_folder = articles_path.joinpath(
+        *source_folder_for_note(frontmatter, folder).split("/")
+    )
+    output_folder.mkdir(parents=True, exist_ok=True)
     suffix_number = 1
     while True:
         suffix = "" if suffix_number == 1 else f" ({suffix_number})"
         name = f"Article - {title[: 140 - len(suffix)]}{suffix}.md"
-        output = folder / name
+        output = output_folder / name
         try:
             with output.open("x", encoding="utf-8", newline="") as note:
                 note.write(frontmatter + markdown)
@@ -128,14 +132,31 @@ def find_note_for_source(articles_path: Path, source_url: str) -> Path | None:
     return None
 
 
-def source_folder_for_note(frontmatter: str) -> str:
+def source_folder_for_note(frontmatter: str, folder: str | None = None) -> str:
     """Resolve an article's source folder from its existing frontmatter."""
+    if folder is not None:
+        return normalize_storage_folder(folder)
     feed = _frontmatter_scalar(frontmatter, "feed")
     if feed:
         return _safe_folder_name(feed)
     source = _frontmatter_scalar(frontmatter, "source")
     hostname = urlsplit(source).hostname if source else None
     return _safe_folder_name(hostname) if hostname else "Unknown Source"
+
+
+def normalize_storage_folder(value: str) -> str:
+    """Return a safe Articles-relative folder path or reject an unsafe override."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("storage folder must be a non-empty relative path")
+    normalized = value.replace("\\", "/")
+    if normalized.startswith("/") or re.match(r"^[A-Za-z]:", normalized):
+        raise ValueError("storage folder must be relative to Articles")
+    parts = normalized.split("/")
+    if any(not part or part in {".", ".."} for part in parts):
+        raise ValueError("storage folder cannot contain empty or traversal segments")
+    if any(_WINDOWS_UNSAFE.search(part) or _TRAILING_WINDOWS_UNSAFE.search(part) for part in parts):
+        raise ValueError("storage folder contains unsafe path characters")
+    return "/".join(parts)
 
 
 def group_articles_by_source(articles_path: Path, state_path: Path) -> int:

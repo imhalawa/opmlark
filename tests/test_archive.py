@@ -196,7 +196,7 @@ class ArchiveFeedTests(unittest.TestCase):
         self.assertEqual("https://feeds.feedburner.com/martinkl", ARCHIVE_SOURCES["martin-kleppmann"].subscription.feed_url)
 
     def test_opml_includes_all_archive_publishers_under_system_design(self) -> None:
-        subscriptions = parse_opml(Path(__file__).parents[1] / "feeds.opml")
+        subscriptions = parse_opml(Path(__file__).parents[1] / "feeds" / "system-design.opml")
 
         self.assertEqual(
             {
@@ -207,7 +207,7 @@ class ArchiveFeedTests(unittest.TestCase):
             {
                 (subscription.name, subscription.feed_url)
                 for subscription in subscriptions
-                if subscription.topic == "System Design"
+                if subscription.topic == "System Design and Distributed Systems"
                 and subscription.name in {"ByteByteGo", "High Scalability", "Martin Kleppmann"}
             },
         )
