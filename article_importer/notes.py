@@ -19,6 +19,8 @@ _IMPORTER_MARKER = re.compile(
     r"^ingested_by:\s*opml-defuddle-articles\s*$", re.MULTILINE
 )
 _TYPE_FIELD = re.compile(r"^type\s*:", re.MULTILINE)
+_ARTICLE_TYPE_FIELD = re.compile(r'^type\s*:\s*(?:"article"|article)\s*$', re.MULTILINE)
+_TOPIC_FIELD = re.compile(r"^topic\s*:", re.MULTILINE)
 
 
 def build_frontmatter(
@@ -61,6 +63,23 @@ def add_article_type_to_imported_notes(articles_path: Path) -> int:
         except (OSError, UnicodeDecodeError):
             continue
         updated_contents = _add_article_type(contents)
+        if updated_contents is None:
+            continue
+        _replace_atomically(path, updated_contents)
+        updated += 1
+    return updated
+
+
+def add_topics_to_legacy_articles(articles_path: Path) -> int:
+    """Classify legacy article notes that do not yet have a topic."""
+    updated = 0
+    for path in articles_path.glob("*.md"):
+        try:
+            with path.open("r", encoding="utf-8", newline="") as note:
+                contents = note.read()
+        except (OSError, UnicodeDecodeError):
+            continue
+        updated_contents = _add_legacy_topic(contents)
         if updated_contents is None:
             continue
         _replace_atomically(path, updated_contents)
@@ -113,6 +132,41 @@ def _add_article_type(contents: str) -> str | None:
     if not _IMPORTER_MARKER.search(frontmatter) or _TYPE_FIELD.search(frontmatter):
         return None
     return contents[: opening.end()] + f'type: "article"{opening.group(1)}' + contents[opening.end() :]
+
+
+def _add_legacy_topic(contents: str) -> str | None:
+    opening = _FRONTMATTER_OPENING.match(contents)
+    if opening is None:
+        return None
+    closing = _FRONTMATTER_CLOSING.search(contents, opening.end())
+    if closing is None:
+        return None
+    frontmatter = contents[opening.end() : closing.start()]
+    if _IMPORTER_MARKER.search(frontmatter) or _TOPIC_FIELD.search(frontmatter):
+        return None
+    if not _ARTICLE_TYPE_FIELD.search(frontmatter):
+        return None
+    topic = _legacy_topic(frontmatter)
+    return contents[: opening.end()] + f"topic: {_yaml_scalar(topic)}{opening.group(1)}" + contents[opening.end() :]
+
+
+def _legacy_topic(frontmatter: str) -> str:
+    title = _frontmatter_title("---\n" + frontmatter + "---\n")
+    tags = " ".join(re.findall(r"^\s{2}-\s+(.+)$", frontmatter, flags=re.MULTILINE))
+    text = f"{title} {tags}".lower()
+    if any(value in text for value in ("adhd", "procrastinat", "sleep", "focused", "time management")):
+        return "Psychology (ADHD)"
+    if any(value in text for value in ("sort", "algorithm", "data structure")):
+        return "Algorithms and Data Structures"
+    if any(value in text for value in ("aws", "system design", "distributed", "caching", "load balanc", "serverless", "domain-driven", "microservice", "nosql", "stack overflow")):
+        return "System Design"
+    if any(value in text for value in ("finance", "trading")):
+        return "Finance"
+    if any(value in text for value in ("universe", "physics", "multiverse")):
+        return "Science"
+    if any(value in text for value in ("questions", "better future", "pressure")):
+        return "Personal Development"
+    return "Software Engineering"
 
 
 def _replace_atomically(path: Path, contents: str) -> None:

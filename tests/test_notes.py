@@ -12,6 +12,7 @@ from article_importer.defuddle import DefuddledArticle, run_defuddle
 from article_importer.models import FeedEntry, FeedSubscription
 from article_importer.notes import (
     add_article_type_to_imported_notes,
+    add_topics_to_legacy_articles,
     build_frontmatter,
     create_note,
 )
@@ -237,6 +238,61 @@ class NotesTests(unittest.TestCase):
 
         self.assertEqual(original, note.read_bytes())
         replace.assert_called_once()
+
+    def test_add_topics_classifies_legacy_notes_without_overwriting_topics(self) -> None:
+        system_design = self.articles / "system-design.md"
+        system_design.write_text(
+            "---\n"
+            'title: "Caching Strategies"\n'
+            "tags:\n"
+            "  - aws\n"
+            "type: article\n"
+            "---\n"
+            "body\n",
+            encoding="utf-8",
+            newline="",
+        )
+        algorithms = self.articles / "algorithms.md"
+        algorithms.write_text(
+            "---\n"
+            'title: "Counting and Bucket Sort"\n'
+            "type: article\n"
+            "---\n"
+            "algorithm body\n",
+            encoding="utf-8",
+            newline="",
+        )
+        preserved = self.articles / "preserved.md"
+        preserved.write_text(
+            "---\n"
+            'title: "Existing"\n'
+            'topic: "Custom"\n'
+            "type: article\n"
+            "---\n"
+            "body\n",
+            encoding="utf-8",
+            newline="",
+        )
+        non_article = self.articles / "book.md"
+        non_article.write_text(
+            "---\n"
+            'title: "A Book"\n'
+            "type: book\n"
+            "---\n"
+            "body\n",
+            encoding="utf-8",
+            newline="",
+        )
+
+        updated = add_topics_to_legacy_articles(self.articles)
+
+        self.assertEqual(2, updated)
+        self.assertIn('topic: "System Design"\n', system_design.read_text(encoding="utf-8"))
+        self.assertIn(
+            'topic: "Algorithms and Data Structures"\n', algorithms.read_text(encoding="utf-8")
+        )
+        self.assertIn('topic: "Custom"\n', preserved.read_text(encoding="utf-8"))
+        self.assertNotIn('topic:', non_article.read_text(encoding="utf-8"))
 
     def test_note_uses_incrementing_name_when_title_collides(self) -> None:
         frontmatter = build_frontmatter(ARTICLE, ENTRY, NOW)

@@ -42,6 +42,22 @@ Run the importer manually:
 & .\run-import.ps1
 ```
 
+## Frontmatter migrations
+
+To add `type: article` to importer-created notes that predate the property:
+
+```powershell
+& .\run-import.ps1 --add-article-type
+```
+
+To add a missing topic only to legacy notes whose top-level frontmatter is exactly `type: article` (never importer-marked notes and never notes that already have a topic):
+
+```powershell
+& .\run-import.ps1 --add-topics
+```
+
+The topic migration uses title and tag keywords in this precedence: `Psychology (ADHD)`, `Algorithms and Data Structures`, `System Design`, `Finance`, `Science`, `Personal Development`, then `Software Engineering` as the fallback. Both migrations update YAML frontmatter only, preserve the article body, and are idempotent.
+
 ## Daily schedule
 
 Install or update the idempotent daily task. It is named `OPML Defuddle Articles`, runs the project-local `run-import.ps1`, and is scheduled for local 07:00 with a 30-minute execution limit:
