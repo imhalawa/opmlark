@@ -57,6 +57,20 @@ def create_note(articles_path: Path, frontmatter: str, markdown: str) -> Path:
             suffix_number += 1
 
 
+def find_note_for_source(articles_path: Path, source_url: str) -> Path | None:
+    """Find an existing importer-created note for *source_url*, if one exists."""
+    source_line = f"source: {_yaml_scalar(source_url)}"
+    marker = "ingested_by: opml-defuddle-articles"
+    for path in articles_path.glob("*.md"):
+        try:
+            contents = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if source_line in contents and marker in contents:
+            return path
+    return None
+
+
 def _yaml_scalar(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 

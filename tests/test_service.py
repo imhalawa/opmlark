@@ -12,7 +12,7 @@ from article_importer.configuration import ConfigurationError, ImporterConfig
 from article_importer.defuddle import DefuddledArticle
 from article_importer.models import FeedSubscription
 from article_importer.service import ImportService, RunSummary
-from tests.fixtures import RSS, RSS_WITH_NEW_ENTRY
+from tests.fixtures import RSS, RSS_WITH_NEW_AND_RETRY_ENTRY, RSS_WITH_NEW_ENTRY
 
 
 GOOD_FEED = FeedSubscription("System Design", "Example", "https://example.test/feed")
@@ -95,6 +95,45 @@ class ImportServiceTests(unittest.TestCase):
         self.assertFalse((self.articles.parents[2] / "data" / "articles.sqlite3").exists())
         self.assertEqual([], list(self.articles.glob("*.md")))
 
+    def test_dry_run_reports_post_baseline_imports_and_retries_without_writes(self) -> None:
+        self.service.run(dry_run=False)
+        self.fetcher.return_value = RSS_WITH_NEW_ENTRY
+        self.defuddle.side_effect = RuntimeError("Defuddle unavailable")
+        self.service.run(dry_run=False)
+        self.fetcher.return_value = RSS_WITH_NEW_AND_RETRY_ENTRY
+        database = self.articles.parents[2] / "data" / "articles.sqlite3"
+        before_database = database.read_bytes()
+        calls_before_preview = self.defuddle.call_count
+
+        preview = self.service.run(dry_run=True)
+
+        self.assertEqual(1, preview.would_import)
+        self.assertEqual(1, preview.would_retry)
+        self.assertEqual(0, preview.imported)
+        self.assertEqual(calls_before_preview, self.defuddle.call_count)
+        self.assertEqual([], list(self.articles.glob("*.md")))
+        self.assertEqual(before_database, database.read_bytes())
+
+    def test_state_failure_after_note_creation_recovers_without_duplicate_note(self) -> None:
+        self.service.run(dry_run=False)
+        self.fetcher.return_value = RSS_WITH_NEW_ENTRY
+
+        with patch(
+            "article_importer.service.StateStore.mark_imported",
+            side_effect=OSError("database is unavailable"),
+        ):
+            failed = self.service.run(dry_run=False)
+
+        self.assertEqual(1, failed.failed_entries)
+        self.assertEqual(1, len(list(self.articles.glob("Article - *.md"))))
+        calls_after_failed_run = self.defuddle.call_count
+
+        recovered = self.service.run(dry_run=False)
+
+        self.assertEqual(0, recovered.failed_entries)
+        self.assertEqual(1, len(list(self.articles.glob("Article - *.md"))))
+        self.assertEqual(calls_after_failed_run, self.defuddle.call_count)
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -146,6 +185,20 @@ class FetchArticlesCliTests(unittest.TestCase):
 
         self.assertEqual(1, exit_code)
         self.assertIn("invalid config", output.getvalue())
+
+    def test_cli_dry_run_does_not_create_operational_files(self) -> None:
+        service = Mock()
+        service.run.return_value = RunSummary(seeded=2)
+
+        with (
+            patch.object(self.script, "load_config", return_value=self.config),
+            patch.object(self.script, "parse_opml", return_value=[]),
+            patch.object(self.script, "ImportService", return_value=service),
+        ):
+            exit_code = self.script.main(["--dry-run"])
+
+        self.assertEqual(0, exit_code)
+        self.assertFalse((self.root / "data").exists())
 
 
 def _load_fetch_articles() -> object:

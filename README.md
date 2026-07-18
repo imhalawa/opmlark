@@ -20,7 +20,7 @@ Test-Path 'C:\Users\imhal\Documents\Traces\Sources\Articles'
 
 ## Configuration and feeds
 
-Edit `config.toml` to set `vault_path` and, when necessary, `defuddle_executable`. Relative paths in this file resolve from the configuration file's directory.
+Edit `config.toml` to set `vault_path` and, when necessary, `defuddle_executable`. Bare executable names (such as `defuddle`) resolve through `PATH`; explicit relative paths resolve from the configuration file's directory.
 
 Put your feed subscriptions in `feeds.opml`. Export or copy an OPML `outline` into its `<body>`; each feed outline needs an `xmlUrl`. A nested parent outline is used as the article topic, and its children become feed subscriptions.
 
@@ -28,7 +28,7 @@ Put your feed subscriptions in `feeds.opml`. Export or copy an OPML `outline` in
 
 The first live run is a **no-backfill** baseline: every entry currently visible in each feed is recorded as `seeded`, with `imported=0`. It does not create article notes. Only entries that appear after that baseline are imported on later runs.
 
-Preview a run without changing the SQLite state or creating notes:
+Preview a run without changing the SQLite state, creating notes, or updating operational logs. The summary reports entries that would be imported or retried:
 
 ```powershell
 & .\run-import.ps1 --dry-run

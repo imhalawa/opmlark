@@ -104,7 +104,14 @@ def _parse_atom(root: ElementTree.Element, subscription: FeedSubscription) -> li
 
 def _atom_url(entry: ElementTree.Element, base_url: str) -> str | None:
     links = [child for child in entry if _local_name(child.tag) == "link"]
-    alternate = next((link for link in links if link.get("rel") == "alternate"), None)
+    alternate = next(
+        (
+            link
+            for link in links
+            if link.get("rel") == "alternate" and link.get("href", "").strip()
+        ),
+        None,
+    )
     selected = alternate
     if selected is None:
         selected = next(

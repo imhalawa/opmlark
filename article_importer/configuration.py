@@ -41,7 +41,7 @@ def load_config(path: Path) -> ImporterConfig:
     executable_value = importer.get("defuddle_executable", "defuddle")
     if not isinstance(executable_value, str) or not executable_value:
         raise ConfigurationError("importer.defuddle_executable must be a non-empty string")
-    executable_path = _resolve_path(executable_value, config_path.parent)
+    executable_path = _resolve_executable(executable_value, config_path.parent)
 
     return ImporterConfig(vault_path, articles_path, str(executable_path))
 
@@ -49,3 +49,11 @@ def load_config(path: Path) -> ImporterConfig:
 def _resolve_path(value: str, base_path: Path) -> Path:
     path = Path(value)
     return path if path.is_absolute() else (base_path / path).resolve()
+
+
+def _resolve_executable(value: str, base_path: Path) -> str:
+    """Resolve explicit executable paths while retaining bare PATH commands."""
+    path = Path(value)
+    if path.is_absolute() or "/" in value or "\\" in value:
+        return str(_resolve_path(value, base_path))
+    return value

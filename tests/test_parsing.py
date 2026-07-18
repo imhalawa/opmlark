@@ -7,7 +7,14 @@ import unittest
 from article_importer.configuration import ConfigurationError, load_config
 from article_importer.models import FeedSubscription
 from article_importer.parsing import parse_feed, parse_opml
-from tests.fixtures import ATOM, ATOM_WITH_DEFAULT_ALTERNATE, OPML, RSS, RSS_WITH_DUPLICATES
+from tests.fixtures import (
+    ATOM,
+    ATOM_WITH_DEFAULT_ALTERNATE,
+    ATOM_WITH_EMPTY_ALTERNATE,
+    OPML,
+    RSS,
+    RSS_WITH_DUPLICATES,
+)
 
 
 class ParsingTests(unittest.TestCase):
@@ -46,6 +53,14 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual(
             "https://example.test/default-alternate",
             parse_feed(ATOM_WITH_DEFAULT_ALTERNATE, feed)[0].url,
+        )
+
+    def test_atom_empty_alternate_falls_back_to_usable_link(self) -> None:
+        feed = FeedSubscription("Algorithms", "Example", "https://example.test/feed")
+
+        self.assertEqual(
+            "https://example.test/usable-fallback",
+            parse_feed(ATOM_WITH_EMPTY_ALTERNATE, feed)[0].url,
         )
 
     def test_feed_discards_duplicate_and_missing_urls(self) -> None:
@@ -93,6 +108,19 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual(vault, loaded.vault_path)
         self.assertEqual(articles, loaded.articles_path)
         self.assertEqual(str(self.temp / "tools" / "defuddle.exe"), loaded.defuddle_executable)
+
+    def test_config_keeps_bare_executable_for_path_resolution(self) -> None:
+        vault = self.temp / "vault"
+        (vault / "Sources" / "Articles").mkdir(parents=True)
+        config = self.temp / "config.toml"
+        config.write_text(
+            '[importer]\nvault_path = "vault"\ndefuddle_executable = "defuddle"\n',
+            encoding="utf-8",
+        )
+
+        loaded = load_config(config)
+
+        self.assertEqual("defuddle", loaded.defuddle_executable)
 
 
 if __name__ == "__main__":

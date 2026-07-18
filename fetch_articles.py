@@ -13,13 +13,20 @@ from article_importer.service import ImportService, RunSummary
 def main(arguments: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Import new OPML feed articles with Defuddle.")
     parser.add_argument("--config", type=Path, help="Path to the importer TOML configuration")
-    parser.add_argument("--dry-run", action="store_true", help="Report work without changing state")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview work without writing notes, database state, or operational logs",
+    )
     args = parser.parse_args(arguments)
 
     project_root = Path(__file__).resolve().parent
     data_path = project_root / "data"
-    data_path.mkdir(parents=True, exist_ok=True)
-    logger = _configure_logger(data_path / "importer.log")
+    if args.dry_run:
+        logger = _dry_run_logger()
+    else:
+        data_path.mkdir(parents=True, exist_ok=True)
+        logger = _configure_logger(data_path / "importer.log")
     try:
         config_path = args.config or project_root / "config.toml"
         config = load_config(config_path)
@@ -57,6 +64,15 @@ def _configure_logger(path: Path) -> logging.Logger:
     return logger
 
 
+def _dry_run_logger() -> logging.Logger:
+    logger = logging.getLogger("article_importer.dry_run")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    _close_logger(logger)
+    logger.addHandler(logging.NullHandler())
+    return logger
+
+
 def _close_logger(logger: logging.Logger) -> None:
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
@@ -66,7 +82,8 @@ def _close_logger(logger: logging.Logger) -> None:
 def _summary_message(summary: RunSummary) -> str:
     return (
         f"seeded={summary.seeded} imported={summary.imported} "
-        f"failed_entries={summary.failed_entries} failed_feeds={summary.failed_feeds}"
+        f"failed_entries={summary.failed_entries} failed_feeds={summary.failed_feeds} "
+        f"would_import={summary.would_import} would_retry={summary.would_retry}"
     )
 
 

@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 from article_importer.configuration import ImporterConfig
 from article_importer.defuddle import DefuddledArticle, run_defuddle
 from article_importer.models import FeedSubscription
-from article_importer.notes import build_frontmatter, create_note
+from article_importer.notes import build_frontmatter, create_note, find_note_for_source
 from article_importer.parsing import parse_feed
 from article_importer.state import StateStore
 
@@ -21,6 +21,8 @@ class RunSummary:
     imported: int = 0
     failed_entries: int = 0
     failed_feeds: int = 0
+    would_import: int = 0
+    would_retry: int = 0
 
 
 class ImportService:
@@ -58,10 +60,24 @@ class ImportService:
 
                 summary = _with(summary, seeded=summary.seeded + batch.seeded)
                 if dry_run:
+                    summary = _with(
+                        summary,
+                        would_import=summary.would_import + batch.new_candidates,
+                        would_retry=summary.would_retry + batch.retry_candidates,
+                    )
                     continue
 
                 for entry in batch.candidates:
+                    note: Path | None = None
                     try:
+                        if entry.url in batch.pending_urls:
+                            note = find_note_for_source(self._config.articles_path, entry.url)
+                            if note is not None:
+                                state.mark_imported(
+                                    entry.subscription.feed_url, entry.url, str(note)
+                                )
+                                continue
+                        state.begin_note_write(entry.subscription.feed_url, entry.url)
                         article = self._defuddle(entry.url, self._config.defuddle_executable)
                         note = create_note(
                             self._config.articles_path,
@@ -70,7 +86,17 @@ class ImportService:
                         )
                         state.mark_imported(entry.subscription.feed_url, entry.url, str(note))
                     except Exception as error:
-                        state.mark_failed(entry.subscription.feed_url, entry.url, str(error))
+                        if note is None:
+                            try:
+                                state.mark_failed(
+                                    entry.subscription.feed_url, entry.url, str(error)
+                                )
+                            except Exception as state_error:
+                                self._logger.error(
+                                    "Failed to record article failure %s: %s",
+                                    entry.url,
+                                    state_error,
+                                )
                         self._logger.error("Failed article %s: %s", entry.url, error)
                         summary = _with(
                             summary, failed_entries=summary.failed_entries + 1
@@ -93,4 +119,6 @@ def _with(summary: RunSummary, **changes: int) -> RunSummary:
         imported=changes.get("imported", summary.imported),
         failed_entries=changes.get("failed_entries", summary.failed_entries),
         failed_feeds=changes.get("failed_feeds", summary.failed_feeds),
+        would_import=changes.get("would_import", summary.would_import),
+        would_retry=changes.get("would_retry", summary.would_retry),
     )

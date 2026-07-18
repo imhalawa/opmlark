@@ -14,6 +14,9 @@ class FeedBatch:
     first_seen: bool
     seeded: int
     candidates: tuple[FeedEntry, ...]
+    new_candidates: int = 0
+    retry_candidates: int = 0
+    pending_urls: frozenset[str] = frozenset()
 
 
 class StateStore:
@@ -80,6 +83,9 @@ class StateStore:
                 batch = FeedBatch(True, len(visible_entries), ())
             else:
                 candidates: list[FeedEntry] = []
+                new_candidates = 0
+                retry_candidates = 0
+                pending_urls: set[str] = set()
                 for entry in visible_entries:
                     row = connection.execute(
                         "SELECT status FROM entries WHERE feed_url = ? AND article_url = ?",
@@ -103,9 +109,23 @@ class StateStore:
                             ),
                         )
                         candidates.append(entry)
+                        new_candidates += 1
                     elif row[0] == "failed":
                         candidates.append(entry)
-                batch = FeedBatch(False, 0, tuple(candidates))
+                        retry_candidates += 1
+                    if connection.execute(
+                        "SELECT 1 FROM pending_writes WHERE feed_url = ? AND article_url = ?",
+                        (subscription.feed_url, entry.url),
+                    ).fetchone() is not None:
+                        pending_urls.add(entry.url)
+                batch = FeedBatch(
+                    False,
+                    0,
+                    tuple(candidates),
+                    new_candidates,
+                    retry_candidates,
+                    frozenset(pending_urls),
+                )
 
             connection.commit()
             return batch
@@ -122,6 +142,25 @@ class StateStore:
             output_path=output_path,
             error_message=None,
         )
+
+    def begin_note_write(self, feed_url: str, article_url: str) -> None:
+        """Durably record a note write before the vault is modified."""
+        timestamp = _utc_timestamp()
+        connection = self._mutable_connection()
+        connection.execute("BEGIN")
+        try:
+            connection.execute(
+                """
+                INSERT INTO pending_writes(feed_url, article_url, started_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(feed_url, article_url) DO UPDATE SET started_at = excluded.started_at
+                """,
+                (feed_url, article_url, timestamp),
+            )
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
 
     def mark_failed(self, feed_url: str, article_url: str, error: str) -> None:
         """Record an import failure so the currently visible article is retried."""
@@ -156,18 +195,37 @@ class StateStore:
             if existing_feed is None:
                 return FeedBatch(True, len(visible_entries), ())
             if "entries" not in tables:
-                return FeedBatch(False, 0, visible_entries)
+                return FeedBatch(False, 0, visible_entries, len(visible_entries))
 
-            candidates = tuple(
-                entry
-                for entry in visible_entries
-                if (row := connection.execute(
+            has_pending_writes = "pending_writes" in tables
+            candidates: list[FeedEntry] = []
+            new_candidates = 0
+            retry_candidates = 0
+            pending_urls: set[str] = set()
+            for entry in visible_entries:
+                row = connection.execute(
                     "SELECT status FROM entries WHERE feed_url = ? AND article_url = ?",
                     (subscription.feed_url, entry.url),
-                ).fetchone()) is None
-                or row[0] == "failed"
+                ).fetchone()
+                if row is None:
+                    candidates.append(entry)
+                    new_candidates += 1
+                elif row[0] == "failed":
+                    candidates.append(entry)
+                    retry_candidates += 1
+                if has_pending_writes and connection.execute(
+                    "SELECT 1 FROM pending_writes WHERE feed_url = ? AND article_url = ?",
+                    (subscription.feed_url, entry.url),
+                ).fetchone() is not None:
+                    pending_urls.add(entry.url)
+            return FeedBatch(
+                False,
+                0,
+                tuple(candidates),
+                new_candidates,
+                retry_candidates,
+                frozenset(pending_urls),
             )
-            return FeedBatch(False, 0, candidates)
         finally:
             connection.close()
 
@@ -198,6 +256,12 @@ class StateStore:
                 error_message TEXT,
                 seen_at TEXT,
                 updated_at TEXT,
+                PRIMARY KEY(feed_url, article_url)
+            );
+            CREATE TABLE IF NOT EXISTS pending_writes(
+                feed_url TEXT,
+                article_url TEXT,
+                started_at TEXT,
                 PRIMARY KEY(feed_url, article_url)
             );
             """
@@ -245,6 +309,10 @@ class StateStore:
                     timestamp,
                     timestamp,
                 ),
+            )
+            connection.execute(
+                "DELETE FROM pending_writes WHERE feed_url = ? AND article_url = ?",
+                (feed_url, article_url),
             )
             connection.commit()
         except BaseException:
