@@ -20,13 +20,13 @@ Test-Path 'C:\Users\imhal\Documents\Traces\Sources\Articles'
 
 ## Configuration and feeds
 
-Edit `config.toml` to set `vault_path` and, when necessary, `defuddle_executable`. Bare executable names (such as `defuddle`) resolve through `PATH`; explicit relative paths resolve from the configuration file's directory.
+Edit `config.toml` to set `vault_path`, `lookback_days`, and, when necessary, `defuddle_executable`. Bare executable names (such as `defuddle`) resolve through `PATH`; explicit relative paths resolve from the configuration file's directory.
 
 Put your feed subscriptions in `feeds.opml`. Export or copy an OPML `outline` into its `<body>`; each feed outline needs an `xmlUrl`. A nested parent outline is used as the article topic, and its children become feed subscriptions.
 
 ## Rolling three-month lookback
 
-Every run considers visible entries from the trailing `lookback_days` window (90 days by default), including when you add a new feed. Eligible URLs are Defuddled once; SQLite prevents repeat imports on later daily runs. Older visible entries are recorded as `seeded` and ignored.
+Every run considers visible entries from the trailing `lookback_days` window (set to 90 days in the supplied configuration), including when you add a new feed. Eligible URLs are Defuddled once; SQLite prevents repeat imports on later daily runs. Older visible entries are recorded as `seeded` and ignored.
 
 When a feed omits an article date, the importer uses its observation time so the article is eligible once. Its note records `publication_date_source: "observed"`; feed-provided timestamps use `publication_date_source: "feed"`.
 

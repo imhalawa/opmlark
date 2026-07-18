@@ -44,8 +44,8 @@ class StateStore:
     ) -> FeedBatch:
         """Return articles that should be imported for *subscription*.
 
-        The first observation of a feed establishes a no-backfill baseline. Later
-        observations surface new articles and prior failures for processing.
+        Every observation surfaces entries inside the supplied lookback window,
+        along with eligible prior failures for processing.
         """
         observed_at = observed_at or datetime.now(timezone.utc)
         visible_entries = _unique_entries(entries)
