@@ -99,7 +99,7 @@ class ParsingTests(unittest.TestCase):
         articles.mkdir(parents=True)
         config = self.temp / "config.toml"
         config.write_text(
-            '[importer]\nvault_path = "vault"\ndefuddle_executable = "tools/defuddle.exe"\n',
+            '[importer]\nvault_path = "vault"\ndefuddle_executable = "tools/defuddle.exe"\nlookback_days = 90\n',
             encoding="utf-8",
         )
 
@@ -114,7 +114,7 @@ class ParsingTests(unittest.TestCase):
         (vault / "Sources" / "Articles").mkdir(parents=True)
         config = self.temp / "config.toml"
         config.write_text(
-            '[importer]\nvault_path = "vault"\ndefuddle_executable = "defuddle"\n',
+            '[importer]\nvault_path = "vault"\ndefuddle_executable = "defuddle"\nlookback_days = 90\n',
             encoding="utf-8",
         )
 
@@ -134,6 +134,15 @@ class ParsingTests(unittest.TestCase):
         loaded = load_config(config)
 
         self.assertEqual(90, loaded.lookback_days)
+
+    def test_config_requires_lookback_days(self) -> None:
+        vault = self.temp / "vault"
+        (vault / "Sources" / "Articles").mkdir(parents=True)
+        config = self.temp / "config.toml"
+        config.write_text('[importer]\nvault_path = "vault"\n', encoding="utf-8")
+
+        with self.assertRaisesRegex(ConfigurationError, "lookback_days"):
+            load_config(config)
 
 
 if __name__ == "__main__":

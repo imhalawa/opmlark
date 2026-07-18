@@ -77,7 +77,7 @@ class StateStoreTests(unittest.TestCase):
             state.candidates(SUBSCRIPTION, [ENTRY])
             batch = state.candidates(SUBSCRIPTION, [NEW, duplicate])
 
-        self.assertEqual((NEW,), batch.candidates)
+        self.assertEqual((NEW.url,), tuple(entry.url for entry in batch.candidates))
 
     def test_dry_run_returns_first_seen_seed_count_without_persisting_it(self) -> None:
         with StateStore(self.database) as state:
@@ -116,8 +116,8 @@ class StateStoreTests(unittest.TestCase):
             preview = state.candidates(SUBSCRIPTION, [NEW], dry_run=True)
             committed = state.candidates(SUBSCRIPTION, [NEW])
 
-        self.assertEqual((NEW,), preview.candidates)
-        self.assertEqual((NEW,), committed.candidates)
+        self.assertEqual((NEW.url,), tuple(entry.url for entry in preview.candidates))
+        self.assertEqual((NEW.url,), tuple(entry.url for entry in committed.candidates))
 
     def test_dry_run_does_not_change_existing_database_rows(self) -> None:
         with StateStore(self.database) as state:
@@ -142,7 +142,7 @@ class StateStoreTests(unittest.TestCase):
         finally:
             after_connection.close()
 
-        self.assertEqual((NEW,), batch.candidates)
+        self.assertEqual((NEW.url,), tuple(entry.url for entry in batch.candidates))
         self.assertEqual(before, after)
 
     def test_mark_failed_does_not_reenable_an_imported_entry(self) -> None:
@@ -222,6 +222,28 @@ class StateStoreTests(unittest.TestCase):
         self.assertEqual(1, preview.seeded)
         self.assertEqual((recent,), preview.candidates)
         self.assertEqual(1, preview.new_candidates)
+
+    def test_undated_retry_keeps_its_first_observation_time(self) -> None:
+        undated = FeedEntry("Undated", "https://example.test/undated", None, SUBSCRIPTION)
+        first_observed = datetime(2026, 4, 1, tzinfo=timezone.utc)
+
+        with StateStore(self.database) as state:
+            first = state.candidates(
+                SUBSCRIPTION,
+                [undated],
+                cutoff=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                observed_at=first_observed,
+            )
+            state.mark_failed(SUBSCRIPTION.feed_url, undated.url, "temporary failure")
+            later = state.candidates(
+                SUBSCRIPTION,
+                [undated],
+                cutoff=datetime(2026, 7, 2, tzinfo=timezone.utc),
+                observed_at=datetime(2026, 7, 18, tzinfo=timezone.utc),
+            )
+
+        self.assertEqual(("observed",), tuple(entry.publication_date_source for entry in first.candidates))
+        self.assertEqual((), later.candidates)
 
 
 if __name__ == "__main__":

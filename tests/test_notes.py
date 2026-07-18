@@ -85,6 +85,19 @@ class NotesTests(unittest.TestCase):
         self.assertEqual("Article - A title (2).md", second.name)
         self.assertEqual("Article - A title (3).md", third.name)
 
+    def test_observed_date_provenance_is_written_to_frontmatter(self) -> None:
+        observed_entry = FeedEntry(
+            "Undated feed title",
+            "https://example.test/undated",
+            NOW,
+            SUBSCRIPTION,
+            "observed",
+        )
+
+        frontmatter = build_frontmatter(ARTICLE, observed_entry, NOW)
+
+        self.assertIn('publication_date_source: "observed"', frontmatter)
+
     def test_note_name_sanitizes_windows_reserved_and_control_characters(self) -> None:
         article = DefuddledArticle('Bad<>:"/\\|?*\x00 title', None, "body")
 

@@ -48,11 +48,9 @@ class StateStore:
         observations surface new articles and prior failures for processing.
         """
         observed_at = observed_at or datetime.now(timezone.utc)
-        visible_entries = _unique_entries(
-            _with_observed_dates(entries, observed_at, apply_fallback=cutoff is not None)
-        )
+        visible_entries = _unique_entries(entries)
         if dry_run:
-            return self._dry_run_candidates(subscription, visible_entries, cutoff)
+            return self._dry_run_candidates(subscription, visible_entries, cutoff, observed_at)
 
         timestamp = _utc_timestamp()
         connection = self._mutable_connection()
@@ -66,8 +64,11 @@ class StateStore:
                     "INSERT INTO feeds(feed_url, name, topic, initialized_at) VALUES (?, ?, ?, ?)",
                     (subscription.feed_url, subscription.name, subscription.topic, timestamp),
                 )
-                older_entries = [entry for entry in visible_entries if not _is_eligible(entry, cutoff)]
-                eligible_entries = [entry for entry in visible_entries if _is_eligible(entry, cutoff)]
+                effective_entries = tuple(
+                    _effective_entry(entry, None, observed_at) for entry in visible_entries
+                )
+                older_entries = [entry for entry in effective_entries if not _is_eligible(entry, cutoff)]
+                eligible_entries = [entry for entry in effective_entries if _is_eligible(entry, cutoff)]
                 connection.executemany(
                     """
                     INSERT INTO entries(
@@ -85,7 +86,7 @@ class StateStore:
                             timestamp,
                             timestamp,
                         )
-                        for entry in visible_entries
+                        for entry in effective_entries
                     ],
                 )
                 batch = FeedBatch(
@@ -101,10 +102,11 @@ class StateStore:
                 pending_urls: set[str] = set()
                 for entry in visible_entries:
                     row = connection.execute(
-                        "SELECT status FROM entries WHERE feed_url = ? AND article_url = ?",
+                        "SELECT status, published, seen_at FROM entries WHERE feed_url = ? AND article_url = ?",
                         (subscription.feed_url, entry.url),
                     ).fetchone()
-                    eligible = _is_eligible(entry, cutoff)
+                    effective_entry = _effective_entry(entry, row, observed_at)
+                    eligible = _is_eligible(effective_entry, cutoff)
                     if row is None:
                         connection.execute(
                             """
@@ -117,17 +119,17 @@ class StateStore:
                                 subscription.feed_url,
                                 entry.url,
                                 entry.title,
-                                _published_value(entry),
+                                _published_value(effective_entry),
                                 "failed" if eligible else "seeded",
                                 timestamp,
                                 timestamp,
                             ),
                         )
                         if eligible:
-                            candidates.append(entry)
+                            candidates.append(effective_entry)
                             new_candidates += 1
                     elif row[0] == "failed" and eligible:
-                        candidates.append(entry)
+                        candidates.append(effective_entry)
                         retry_candidates += 1
                     elif row[0] == "seeded" and eligible:
                         connection.execute(
@@ -136,13 +138,13 @@ class StateStore:
                             WHERE feed_url = ? AND article_url = ?
                             """,
                             (
-                                _published_value(entry),
+                                _published_value(effective_entry),
                                 timestamp,
                                 subscription.feed_url,
                                 entry.url,
                             ),
                         )
-                        candidates.append(entry)
+                        candidates.append(effective_entry)
                         new_candidates += 1
                     if connection.execute(
                         "SELECT 1 FROM pending_writes WHERE feed_url = ? AND article_url = ?",
@@ -208,9 +210,10 @@ class StateStore:
         subscription: FeedSubscription,
         visible_entries: tuple[FeedEntry, ...],
         cutoff: datetime | None,
+        observed_at: datetime,
     ) -> FeedBatch:
         if not self._path.is_file():
-            return _new_feed_batch(visible_entries, cutoff)
+            return _new_feed_batch(visible_entries, cutoff, observed_at)
 
         connection = sqlite3.connect(f"{self._path.resolve().as_uri()}?mode=ro", uri=True)
         try:
@@ -221,15 +224,21 @@ class StateStore:
                 )
             }
             if "feeds" not in tables:
-                return _new_feed_batch(visible_entries, cutoff)
+                return _new_feed_batch(visible_entries, cutoff, observed_at)
 
             existing_feed = connection.execute(
                 "SELECT 1 FROM feeds WHERE feed_url = ?", (subscription.feed_url,)
             ).fetchone()
             if existing_feed is None:
-                return _new_feed_batch(visible_entries, cutoff)
+                return _new_feed_batch(visible_entries, cutoff, observed_at)
             if "entries" not in tables:
-                candidates = tuple(entry for entry in visible_entries if _is_eligible(entry, cutoff))
+                candidates = tuple(
+                    effective_entry
+                    for entry in visible_entries
+                    if _is_eligible(
+                        effective_entry := _effective_entry(entry, None, observed_at), cutoff
+                    )
+                )
                 return FeedBatch(False, 0, candidates, len(candidates))
 
             has_pending_writes = "pending_writes" in tables
@@ -239,18 +248,19 @@ class StateStore:
             pending_urls: set[str] = set()
             for entry in visible_entries:
                 row = connection.execute(
-                    "SELECT status FROM entries WHERE feed_url = ? AND article_url = ?",
+                    "SELECT status, published, seen_at FROM entries WHERE feed_url = ? AND article_url = ?",
                     (subscription.feed_url, entry.url),
                 ).fetchone()
-                eligible = _is_eligible(entry, cutoff)
+                effective_entry = _effective_entry(entry, row, observed_at)
+                eligible = _is_eligible(effective_entry, cutoff)
                 if row is None and eligible:
-                    candidates.append(entry)
+                    candidates.append(effective_entry)
                     new_candidates += 1
                 elif row is not None and row[0] == "failed" and eligible:
-                    candidates.append(entry)
+                    candidates.append(effective_entry)
                     retry_candidates += 1
                 elif row is not None and row[0] == "seeded" and eligible:
-                    candidates.append(entry)
+                    candidates.append(effective_entry)
                     new_candidates += 1
                 if has_pending_writes and connection.execute(
                     "SELECT 1 FROM pending_writes WHERE feed_url = ? AND article_url = ?",
@@ -359,24 +369,40 @@ class StateStore:
             raise
 
 
-def _with_observed_dates(
-    entries: Iterable[FeedEntry], observed_at: datetime, *, apply_fallback: bool
-) -> tuple[FeedEntry, ...]:
-    if not apply_fallback:
-        return tuple(entries)
-    return tuple(
-        replace(entry, published=observed_at, publication_date_source="observed")
-        if entry.published is None
-        else entry
-        for entry in entries
+def _effective_entry(
+    entry: FeedEntry, row: tuple[object, ...] | None, observed_at: datetime
+) -> FeedEntry:
+    if entry.published is not None:
+        return replace(entry, publication_date_source="feed")
+    if row is not None:
+        stored_time = _parse_stored_timestamp(row[1]) or _parse_stored_timestamp(row[2])
+        if stored_time is not None:
+            return replace(entry, published=stored_time, publication_date_source="observed")
+    return replace(entry, published=observed_at, publication_date_source="observed")
+
+
+def _parse_stored_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        timestamp = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    return timestamp.astimezone(timezone.utc)
+
+
+def _new_feed_batch(
+    visible_entries: tuple[FeedEntry, ...], cutoff: datetime | None, observed_at: datetime
+) -> FeedBatch:
+    effective_entries = tuple(
+        _effective_entry(entry, None, observed_at) for entry in visible_entries
     )
-
-
-def _new_feed_batch(visible_entries: tuple[FeedEntry, ...], cutoff: datetime | None) -> FeedBatch:
-    candidates = tuple(entry for entry in visible_entries if _is_eligible(entry, cutoff))
+    candidates = tuple(entry for entry in effective_entries if _is_eligible(entry, cutoff))
     return FeedBatch(
         True,
-        len(visible_entries) - len(candidates),
+        len(effective_entries) - len(candidates),
         candidates,
         len(candidates),
     )

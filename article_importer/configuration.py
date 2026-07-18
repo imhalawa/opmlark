@@ -44,7 +44,7 @@ def load_config(path: Path) -> ImporterConfig:
         raise ConfigurationError("importer.defuddle_executable must be a non-empty string")
     executable_path = _resolve_executable(executable_value, config_path.parent)
 
-    lookback_days = importer.get("lookback_days", 90)
+    lookback_days = importer.get("lookback_days")
     if isinstance(lookback_days, bool) or not isinstance(lookback_days, int) or lookback_days <= 0:
         raise ConfigurationError("importer.lookback_days must be a positive integer")
 
