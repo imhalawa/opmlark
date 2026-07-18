@@ -9,6 +9,9 @@ RSS = b'''<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0"><channel><item>
   <title>RSS article</title><link>/rss</link>
   <pubDate>Tue, 01 Jul 2025 12:00:00 +0000</pubDate>
+</item><item>
+  <title>Second RSS article</title><link>/second</link>
+  <pubDate>Tue, 01 Jul 2025 13:00:00 +0000</pubDate>
 </item></channel></rss>'''
 
 ATOM = b'''<?xml version="1.0" encoding="UTF-8"?>
@@ -33,4 +36,14 @@ RSS_WITH_DUPLICATES = b'''<rss version="2.0"><channel>
   <item><title>First</title><link>/entry</link></item>
   <item><title>Duplicate</title><link>/entry</link></item>
   <item><title>No link</title></item>
+</channel></rss>'''
+
+RSS_WITH_NEW_ENTRY = b'''<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+  <item><title>RSS article</title><link>/rss</link>
+    <pubDate>Tue, 01 Jul 2025 12:00:00 +0000</pubDate></item>
+  <item><title>Second RSS article</title><link>/second</link>
+    <pubDate>Tue, 01 Jul 2025 13:00:00 +0000</pubDate></item>
+  <item><title>New article</title><link>/new</link>
+    <pubDate>Wed, 02 Jul 2025 12:00:00 +0000</pubDate></item>
 </channel></rss>'''

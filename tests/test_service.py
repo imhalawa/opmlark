@@ -1,0 +1,158 @@
+from __future__ import annotations
+
+import contextlib
+import importlib.util
+from io import StringIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import unittest
+from unittest.mock import Mock, patch
+
+from article_importer.configuration import ConfigurationError, ImporterConfig
+from article_importer.defuddle import DefuddledArticle
+from article_importer.models import FeedSubscription
+from article_importer.service import ImportService, RunSummary
+from tests.fixtures import RSS, RSS_WITH_NEW_ENTRY
+
+
+GOOD_FEED = FeedSubscription("System Design", "Example", "https://example.test/feed")
+BAD_FEED = FeedSubscription("Broken", "Broken", "https://example.test/broken")
+ARTICLE = DefuddledArticle("An article", None, "# Unchanged\n")
+
+
+class ImportServiceTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary_directory = TemporaryDirectory()
+        root = Path(self.temporary_directory.name)
+        self.articles = root / "vault" / "Sources" / "Articles"
+        self.articles.mkdir(parents=True)
+        self.fetcher = Mock(return_value=RSS)
+        self.defuddle = Mock(return_value=ARTICLE)
+        self.service = self._service([GOOD_FEED])
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def _service(self, subscriptions: list[FeedSubscription]) -> ImportService:
+        config = ImporterConfig(
+            vault_path=self.articles.parents[2],
+            articles_path=self.articles,
+            defuddle_executable="defuddle",
+        )
+        return ImportService(
+            config,
+            subscriptions,
+            self.articles.parents[2] / "data" / "articles.sqlite3",
+            fetch_bytes=self.fetcher,
+            defuddle=self.defuddle,
+        )
+
+    def test_first_run_seeds_without_defuddle(self) -> None:
+        summary = self.service.run(dry_run=False)
+
+        self.assertEqual(2, summary.seeded)
+        self.assertEqual(0, summary.imported)
+        self.defuddle.assert_not_called()
+
+    def test_later_new_entry_is_imported_and_marked(self) -> None:
+        self.service.run(dry_run=False)
+        self.fetcher.return_value = RSS_WITH_NEW_ENTRY
+
+        summary = self.service.run(dry_run=False)
+
+        self.assertEqual(1, summary.imported)
+        note = next(self.articles.glob("Article - *.md"))
+        self.assertIn("ingested_by: opml-defuddle-articles", note.read_text(encoding="utf-8"))
+
+    def test_bad_feed_does_not_prevent_other_feed(self) -> None:
+        self.fetcher.side_effect = lambda url: (
+            RSS if url == GOOD_FEED.feed_url else (_ for _ in ()).throw(OSError("offline"))
+        )
+        self.service = self._service([BAD_FEED, GOOD_FEED])
+
+        summary = self.service.run(dry_run=False)
+
+        self.assertEqual(1, summary.failed_feeds)
+        self.assertEqual(2, summary.seeded)
+
+    def test_failed_entry_is_recorded_and_later_retried(self) -> None:
+        self.service.run(dry_run=False)
+        self.fetcher.return_value = RSS_WITH_NEW_ENTRY
+        self.defuddle.side_effect = RuntimeError("Defuddle unavailable")
+
+        failed = self.service.run(dry_run=False)
+
+        self.assertEqual(1, failed.failed_entries)
+        self.defuddle.side_effect = None
+        retried = self.service.run(dry_run=False)
+        self.assertEqual(1, retried.imported)
+
+    def test_dry_run_never_calls_defuddle_or_creates_state(self) -> None:
+        summary = self.service.run(dry_run=True)
+
+        self.assertEqual(2, summary.seeded)
+        self.defuddle.assert_not_called()
+        self.assertFalse((self.articles.parents[2] / "data" / "articles.sqlite3").exists())
+        self.assertEqual([], list(self.articles.glob("*.md")))
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class FetchArticlesCliTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary_directory = TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        self.articles = self.root / "vault" / "Sources" / "Articles"
+        self.articles.mkdir(parents=True)
+        self.config = ImporterConfig(self.articles.parents[2], self.articles, "defuddle")
+        self.script = _load_fetch_articles()
+        self.script.__file__ = str(self.root / "fetch_articles.py")
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def test_cli_writes_root_relative_utf8_log_and_prints_summary(self) -> None:
+        service = Mock()
+        service.run.return_value = RunSummary(seeded=2, imported=1)
+        output = StringIO()
+        with (
+            patch.object(self.script, "load_config", return_value=self.config),
+            patch.object(self.script, "parse_opml", return_value=[]),
+            patch.object(self.script, "ImportService", return_value=service),
+            contextlib.redirect_stdout(output),
+        ):
+            exit_code = self.script.main([])
+
+        self.assertEqual(0, exit_code)
+        self.assertIn("seeded=2 imported=1 failed_entries=0 failed_feeds=0", output.getvalue())
+        self.assertIn(
+            "Import summary: seeded=2 imported=1 failed_entries=0 failed_feeds=0",
+            (self.root / "data" / "importer.log").read_text(encoding="utf-8"),
+        )
+
+    def test_cli_returns_one_for_invalid_configuration(self) -> None:
+        output = StringIO()
+        with (
+            patch.object(
+                self.script,
+                "load_config",
+                side_effect=ConfigurationError("invalid config"),
+            ),
+            contextlib.redirect_stdout(output),
+        ):
+            exit_code = self.script.main([])
+
+        self.assertEqual(1, exit_code)
+        self.assertIn("invalid config", output.getvalue())
+
+
+def _load_fetch_articles() -> object:
+    script_path = Path(__file__).parents[1] / "fetch_articles.py"
+    specification = importlib.util.spec_from_file_location("fetch_articles_test", script_path)
+    if specification is None or specification.loader is None:
+        raise RuntimeError("Could not load fetch_articles.py")
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
