@@ -63,6 +63,7 @@ class NotesTests(unittest.TestCase):
             'feed: "Publisher"\n'
             'topic: "System Design"\n'
             'published: "2026-07-18T07:00:00+00:00"\n'
+            'publication_date_source: "feed"\n'
             'imported: "2026-07-18T07:00:00+00:00"\n'
             'author: "Ada Lovelace"\n'
             "ingested_by: opml-defuddle-articles\n"

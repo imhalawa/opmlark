@@ -25,6 +25,7 @@ def build_frontmatter(
         f"feed: {_yaml_scalar(entry.subscription.name)}",
         f"topic: {_yaml_scalar(entry.subscription.topic)}",
         f"published: {_yaml_scalar(_timestamp(entry.published))}",
+        f"publication_date_source: {_yaml_scalar(entry.publication_date_source)}",
         f"imported: {_yaml_scalar(_timestamp(imported_at))}",
     ]
     if article.author:

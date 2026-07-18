@@ -43,9 +43,14 @@ class StateStoreTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
 
-    def test_first_observation_seeds_and_returns_no_candidates(self) -> None:
+    def test_first_observation_seeds_an_entry_outside_the_lookback(self) -> None:
         with StateStore(self.database) as state:
-            batch = state.candidates(SUBSCRIPTION, [ENTRY])
+            batch = state.candidates(
+                SUBSCRIPTION,
+                [ENTRY],
+                cutoff=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                observed_at=datetime(2026, 7, 18, tzinfo=timezone.utc),
+            )
 
         self.assertTrue(batch.first_seen)
         self.assertEqual(1, batch.seeded)
@@ -76,8 +81,19 @@ class StateStoreTests(unittest.TestCase):
 
     def test_dry_run_returns_first_seen_seed_count_without_persisting_it(self) -> None:
         with StateStore(self.database) as state:
-            preview = state.candidates(SUBSCRIPTION, [ENTRY], dry_run=True)
-            committed = state.candidates(SUBSCRIPTION, [ENTRY])
+            preview = state.candidates(
+                SUBSCRIPTION,
+                [ENTRY],
+                cutoff=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                observed_at=datetime(2026, 7, 18, tzinfo=timezone.utc),
+                dry_run=True,
+            )
+            committed = state.candidates(
+                SUBSCRIPTION,
+                [ENTRY],
+                cutoff=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                observed_at=datetime(2026, 7, 18, tzinfo=timezone.utc),
+            )
 
         self.assertTrue(preview.first_seen)
         self.assertEqual(1, preview.seeded)
@@ -156,6 +172,56 @@ class StateStoreTests(unittest.TestCase):
         finally:
             connection.close()
         self.assertEqual("2025-01-02T03:04:05+00:00", published)
+
+    def test_new_feed_candidates_include_only_recent_and_undated_entries(self) -> None:
+        observed_at = datetime(2026, 7, 18, tzinfo=timezone.utc)
+        cutoff = datetime(2026, 4, 19, tzinfo=timezone.utc)
+        old = FeedEntry("Old", "https://example.test/old", datetime(2026, 1, 1, tzinfo=timezone.utc), SUBSCRIPTION)
+        recent = FeedEntry("Recent", "https://example.test/recent", datetime(2026, 7, 1, tzinfo=timezone.utc), SUBSCRIPTION)
+        undated = FeedEntry("Undated", "https://example.test/undated", None, SUBSCRIPTION)
+
+        with StateStore(self.database) as state:
+            batch = state.candidates(
+                SUBSCRIPTION, [old, recent, undated], cutoff=cutoff, observed_at=observed_at
+            )
+
+        self.assertEqual({recent.url, undated.url}, {entry.url for entry in batch.candidates})
+        self.assertEqual(1, batch.seeded)
+        observed_entry = next(entry for entry in batch.candidates if entry.url == undated.url)
+        self.assertEqual("observed", observed_entry.publication_date_source)
+
+    def test_recent_seeded_entry_is_promoted_but_old_seeded_entry_stays_ignored(self) -> None:
+        observed_at = datetime(2026, 7, 18, tzinfo=timezone.utc)
+        cutoff = datetime(2026, 4, 19, tzinfo=timezone.utc)
+        old = FeedEntry("Old", "https://example.test/old", datetime(2026, 1, 1, tzinfo=timezone.utc), SUBSCRIPTION)
+        recent = FeedEntry("Recent", "https://example.test/recent", datetime(2026, 7, 1, tzinfo=timezone.utc), SUBSCRIPTION)
+
+        with StateStore(self.database) as state:
+            state.candidates(SUBSCRIPTION, [old, recent])
+            batch = state.candidates(
+                SUBSCRIPTION, [old, recent], cutoff=cutoff, observed_at=observed_at
+            )
+
+        self.assertEqual((recent,), batch.candidates)
+
+    def test_dry_run_previews_recent_entries_for_a_new_feed(self) -> None:
+        observed_at = datetime(2026, 7, 18, tzinfo=timezone.utc)
+        cutoff = datetime(2026, 4, 19, tzinfo=timezone.utc)
+        old = FeedEntry("Old", "https://example.test/old", datetime(2026, 1, 1, tzinfo=timezone.utc), SUBSCRIPTION)
+        recent = FeedEntry("Recent", "https://example.test/recent", datetime(2026, 7, 1, tzinfo=timezone.utc), SUBSCRIPTION)
+
+        with StateStore(self.database) as state:
+            preview = state.candidates(
+                SUBSCRIPTION,
+                [old, recent],
+                cutoff=cutoff,
+                observed_at=observed_at,
+                dry_run=True,
+            )
+
+        self.assertEqual(1, preview.seeded)
+        self.assertEqual((recent,), preview.candidates)
+        self.assertEqual(1, preview.new_candidates)
 
 
 if __name__ == "__main__":

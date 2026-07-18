@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import logging
 from pathlib import Path
 from urllib.request import Request, urlopen
@@ -48,11 +48,19 @@ class ImportService:
     def run(self, dry_run: bool) -> RunSummary:
         """Process every feed, recording failures without stopping later feeds."""
         summary = RunSummary()
+        observed_at = datetime.now(timezone.utc)
+        cutoff = observed_at - timedelta(days=self._config.lookback_days)
         with StateStore(self._state_path) as state:
             for subscription in self._subscriptions:
                 try:
                     entries = parse_feed(self._fetch_bytes(subscription.feed_url), subscription)
-                    batch = state.candidates(subscription, entries, dry_run=dry_run)
+                    batch = state.candidates(
+                        subscription,
+                        entries,
+                        cutoff=cutoff,
+                        observed_at=observed_at,
+                        dry_run=dry_run,
+                    )
                 except Exception as error:
                     self._logger.error("Failed feed %s: %s", subscription.feed_url, error)
                     summary = _with(summary, failed_feeds=summary.failed_feeds + 1)

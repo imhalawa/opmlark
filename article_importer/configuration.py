@@ -14,6 +14,7 @@ class ImporterConfig:
     vault_path: Path
     articles_path: Path
     defuddle_executable: str
+    lookback_days: int = 90
 
 
 def load_config(path: Path) -> ImporterConfig:
@@ -43,7 +44,11 @@ def load_config(path: Path) -> ImporterConfig:
         raise ConfigurationError("importer.defuddle_executable must be a non-empty string")
     executable_path = _resolve_executable(executable_value, config_path.parent)
 
-    return ImporterConfig(vault_path, articles_path, str(executable_path))
+    lookback_days = importer.get("lookback_days", 90)
+    if isinstance(lookback_days, bool) or not isinstance(lookback_days, int) or lookback_days <= 0:
+        raise ConfigurationError("importer.lookback_days must be a positive integer")
+
+    return ImporterConfig(vault_path, articles_path, str(executable_path), lookback_days)
 
 
 def _resolve_path(value: str, base_path: Path) -> Path:

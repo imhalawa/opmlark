@@ -122,6 +122,19 @@ class ParsingTests(unittest.TestCase):
 
         self.assertEqual("defuddle", loaded.defuddle_executable)
 
+    def test_config_reads_positive_lookback_days(self) -> None:
+        vault = self.temp / "vault"
+        (vault / "Sources" / "Articles").mkdir(parents=True)
+        config = self.temp / "config.toml"
+        config.write_text(
+            '[importer]\nvault_path = "vault"\nlookback_days = 90\n',
+            encoding="utf-8",
+        )
+
+        loaded = load_config(config)
+
+        self.assertEqual(90, loaded.lookback_days)
+
 
 if __name__ == "__main__":
     unittest.main()

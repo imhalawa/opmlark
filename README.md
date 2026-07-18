@@ -24,9 +24,11 @@ Edit `config.toml` to set `vault_path` and, when necessary, `defuddle_executable
 
 Put your feed subscriptions in `feeds.opml`. Export or copy an OPML `outline` into its `<body>`; each feed outline needs an `xmlUrl`. A nested parent outline is used as the article topic, and its children become feed subscriptions.
 
-## First run and no-backfill behavior
+## Rolling three-month lookback
 
-The first live run is a **no-backfill** baseline: every entry currently visible in each feed is recorded as `seeded`, with `imported=0`. It does not create article notes. Only entries that appear after that baseline are imported on later runs.
+Every run considers visible entries from the trailing `lookback_days` window (90 days by default), including when you add a new feed. Eligible URLs are Defuddled once; SQLite prevents repeat imports on later daily runs. Older visible entries are recorded as `seeded` and ignored.
+
+When a feed omits an article date, the importer uses its observation time so the article is eligible once. Its note records `publication_date_source: "observed"`; feed-provided timestamps use `publication_date_source: "feed"`.
 
 Preview a run without changing the SQLite state, creating notes, or updating operational logs. The summary reports entries that would be imported or retried:
 

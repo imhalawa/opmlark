@@ -18,3 +18,4 @@ class FeedEntry:
     url: str
     published: datetime | None
     subscription: FeedSubscription
+    publication_date_source: str = "feed"
