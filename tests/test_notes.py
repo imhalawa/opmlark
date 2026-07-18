@@ -16,6 +16,7 @@ from article_importer.notes import (
     build_frontmatter,
     create_note,
     group_articles_by_source,
+    normalize_storage_folder,
     source_folder_for_note,
 )
 from article_importer.state import StateStore
@@ -174,12 +175,42 @@ class NotesTests(unittest.TestCase):
         )
         self.assertEqual("Unknown Source", source_folder_for_note("title: Missing"))
 
+    def test_source_folder_prefers_explicit_storage_folder(self) -> None:
+        self.assertEqual(
+            "Company Engineering/Uber",
+            source_folder_for_note('feed: "Uber Engineering"', "Company Engineering/Uber"),
+        )
+
+    def test_storage_folder_rejects_absolute_and_traversal_paths(self) -> None:
+        for value in ("", "/outside", "C:/outside", "../outside", "Team/../outside", "Team//Uber"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    normalize_storage_folder(value)
+
     def test_note_is_created_in_its_feed_source_folder(self) -> None:
         output = create_note(
             self.articles, build_frontmatter(ARTICLE, ENTRY, NOW), ARTICLE.markdown
         )
 
         self.assertEqual(self.articles / "Publisher" / "Article - A title.md", output)
+
+    def test_note_is_created_in_explicit_nested_storage_folder(self) -> None:
+        subscription = FeedSubscription(
+            "System Design",
+            "Uber Engineering",
+            "https://example.test/feed",
+            source_id="uber-engineering",
+            folder="Company Engineering/Uber",
+        )
+        entry = FeedEntry("Feed title", "https://example.test/article", NOW, subscription)
+
+        output = create_note(
+            self.articles, build_frontmatter(ARTICLE, entry, NOW), ARTICLE.markdown, subscription.folder
+        )
+
+        self.assertEqual(
+            self.articles / "Company Engineering" / "Uber" / "Article - A title.md", output
+        )
 
     def test_group_articles_moves_root_note_without_changing_bytes_or_losing_state(self) -> None:
         note = self.articles / "legacy.md"

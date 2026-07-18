@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0"><head><title>Observability</title></head><body>
+  <outline text="Observability">
+    <outline id="elastic-blog" text="Elastic Blog" title="Elastic Blog" xmlUrl="https://www.elastic.co/blog/feed" htmlUrl="https://www.elastic.co/blog/"/>
+    <outline id="rootly" text="Rootly Blog" title="Rootly Blog" xmlUrl="https://rootly.com/blog/rss.xml" htmlUrl="https://rootly.com/blog/"/>
+    <outline id="new-relic" text="New Relic Blog" title="New Relic Blog" xmlUrl="https://newrelic.com/blog/feed/" htmlUrl="https://newrelic.com/blog/"/>
+    <outline id="sre-weekly" text="SRE Weekly" title="SRE Weekly" xmlUrl="https://sreweekly.com/rss/" htmlUrl="https://sreweekly.com/"/>
+  </outline>
+</body></opml>

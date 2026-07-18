@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0"><head><title>Architecture and Microservices</title></head><body>
+  <outline text="Architecture and Microservices">
+    <outline id="martin-fowler" text="Martin Fowler" title="Martin Fowler" xmlUrl="https://martinfowler.com/feed.atom" htmlUrl="https://martinfowler.com/"/>
+    <outline id="infoq-architecture" text="InfoQ Architecture and Design" title="InfoQ Architecture and Design" xmlUrl="https://feed.infoq.com/architecture-design/" htmlUrl="https://www.infoq.com/architecture-design/"/>
+    <outline id="microservices-io" text="microservices.io" title="microservices.io" xmlUrl="https://microservices.io/feed.xml" htmlUrl="https://microservices.io/"/>
+    <outline id="the-new-stack" text="The New Stack" title="The New Stack" xmlUrl="https://thenewstack.io/feed/" htmlUrl="https://thenewstack.io/"/>
+  </outline>
+</body></opml>

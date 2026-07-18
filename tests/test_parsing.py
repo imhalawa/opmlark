@@ -5,9 +5,9 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from article_importer.configuration import ConfigurationError, load_config
+from article_importer.configuration import ConfigurationError, FeedCatalog, load_config
 from article_importer.models import FeedSubscription
-from article_importer.parsing import parse_feed, parse_opml
+from article_importer.parsing import CatalogError, parse_catalogs, parse_feed, parse_opml
 from tests.fixtures import (
     ATOM,
     ATOM_WITH_DEFAULT_ALTERNATE,
@@ -28,7 +28,7 @@ class ParsingTests(unittest.TestCase):
 
     def test_opml_uses_parent_outline_as_topic(self) -> None:
         path = self.temp / "feeds.opml"
-        path.write_bytes(OPML)
+        path.write_bytes(OPML.replace(b'<outline text="ByteByteGo"', b'<outline id="bytebytego" text="ByteByteGo"'))
 
         self.assertEqual(
             [
@@ -37,10 +37,98 @@ class ParsingTests(unittest.TestCase):
                     "ByteByteGo",
                     "https://example.test/feed",
                     "https://example.test",
+                    "bytebytego",
                 )
             ],
             parse_opml(path),
         )
+
+    def test_catalogs_combine_enabled_files_with_catalog_folder_inheritance(self) -> None:
+        first = self.temp / "system-design.opml"
+        first.write_text(
+            '<opml><body><outline text="System Design"><outline id="bytebytego" text="ByteByteGo" xmlUrl="https://example.test/bytebytego"/></outline></body></opml>',
+            encoding="utf-8",
+        )
+        second = self.temp / "psychology.opml"
+        second.write_text(
+            '<opml><body><outline text="Psychology / ADHD"><outline id="chadd" text="CHADD" xmlUrl="https://example.test/chadd" folder="ADHD"/></outline></body></opml>',
+            encoding="utf-8",
+        )
+
+        subscriptions = parse_catalogs(
+            (
+                FeedCatalog("system-design", first, folder="Engineering"),
+                FeedCatalog("psychology", second, folder="Psychology"),
+            )
+        )
+
+        self.assertEqual(
+            [
+                FeedSubscription(
+                    "System Design", "ByteByteGo", "https://example.test/bytebytego", None,
+                    "bytebytego", "Engineering",
+                ),
+                FeedSubscription(
+                    "Psychology / ADHD", "CHADD", "https://example.test/chadd", None,
+                    "chadd", "ADHD",
+                ),
+            ],
+            subscriptions,
+        )
+
+    def test_catalogs_skip_disabled_sources_and_catalogs(self) -> None:
+        enabled = self.temp / "enabled.opml"
+        enabled.write_text(
+            '<opml><body><outline text="Topic"><outline id="included" text="Included" xmlUrl="https://example.test/included"/><outline id="disabled-in-opml" text="Disabled" xmlUrl="https://example.test/disabled" enabled="false"/><outline id="disabled-in-config" text="Disabled in config" xmlUrl="https://example.test/config"/></outline></body></opml>',
+            encoding="utf-8",
+        )
+        disabled = self.temp / "disabled.opml"
+        disabled.write_text(
+            '<opml><body><outline text="Topic"><outline id="other" text="Other" xmlUrl="https://example.test/other"/></outline></body></opml>',
+            encoding="utf-8",
+        )
+
+        subscriptions = parse_catalogs(
+            (FeedCatalog("enabled", enabled), FeedCatalog("disabled", disabled, enabled=False)),
+            disabled_sources=frozenset({"disabled-in-config"}),
+        )
+
+        self.assertEqual(["included"], [item.source_id for item in subscriptions])
+
+    def test_catalogs_reject_duplicate_source_ids(self) -> None:
+        first = self.temp / "first.opml"
+        first.write_text(
+            '<opml><body><outline text="Topic"><outline id="duplicate" text="First" xmlUrl="https://example.test/first"/></outline></body></opml>',
+            encoding="utf-8",
+        )
+        second = self.temp / "second.opml"
+        second.write_text(
+            '<opml><body><outline text="Topic"><outline id="duplicate" text="Second" xmlUrl="https://example.test/second"/></outline></body></opml>',
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(CatalogError, "duplicate"):
+            parse_catalogs((FeedCatalog("first", first), FeedCatalog("second", second)))
+
+    def test_config_reads_enabled_catalogs_and_disable_lists(self) -> None:
+        vault = self.temp / "vault"
+        (vault / "Sources" / "Articles").mkdir(parents=True)
+        config = self.temp / "config.toml"
+        config.write_text(
+            '[importer]\nvault_path = "vault"\nlookback_days = 90\n'
+            '[feed_catalog]\ndisabled_catalogs = ["disabled"]\ndisabled_sources = ["blocked"]\n'
+            '[[feed_catalogs]]\nid = "system-design"\npath = "feeds/system-design.opml"\nfolder = "Engineering"\n'
+            '[[feed_catalogs]]\nid = "disabled"\npath = "feeds/disabled.opml"\nenabled = true\n',
+            encoding="utf-8",
+        )
+
+        loaded = load_config(config)
+
+        self.assertEqual(
+            (FeedCatalog("system-design", self.temp / "feeds" / "system-design.opml", True, "Engineering"),),
+            loaded.feed_catalogs,
+        )
+        self.assertEqual(frozenset({"blocked"}), loaded.disabled_sources)
 
     def test_rss_and_atom_links_are_read(self) -> None:
         feed = FeedSubscription("Algorithms", "Example", "https://example.test/feed")

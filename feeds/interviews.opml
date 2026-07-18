@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0"><head><title>Interview Practice</title></head><body>
+  <outline text="Interview Mocks and Interview Tips">
+    <outline id="hackerrank-blog" text="HackerRank Blog" title="HackerRank Blog" xmlUrl="https://www.hackerrank.com/blog/feed/" htmlUrl="https://www.hackerrank.com/blog/"/>
+    <outline id="gainlo" text="Gainlo" title="Gainlo" xmlUrl="https://www.gainlo.co/feed/" htmlUrl="https://www.gainlo.co/"/>
+  </outline>
+</body></opml>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0"><head><title>System Design and Distributed Systems</title></head><body>
+  <outline text="System Design and Distributed Systems">
+    <outline id="bytebytego" text="ByteByteGo" title="ByteByteGo" xmlUrl="https://blog.bytebytego.com/feed" htmlUrl="https://blog.bytebytego.com/"/>
+    <outline id="highscalability" text="High Scalability" title="High Scalability" xmlUrl="https://highscalability.com/rss/" htmlUrl="https://highscalability.com/"/>
+    <outline id="martin-kleppmann" text="Martin Kleppmann" title="Martin Kleppmann" xmlUrl="https://feeds.feedburner.com/martinkl" htmlUrl="https://martin.kleppmann.com/"/>
+    <outline id="morning-paper" text="The Morning Paper" title="The Morning Paper" xmlUrl="https://blog.acolyer.org/feed/" htmlUrl="https://blog.acolyer.org/"/>
+    <outline id="architecture-notes" text="Architecture Notes" title="Architecture Notes" xmlUrl="https://architecturenotes.co/feed/" htmlUrl="https://architecturenotes.co/"/>
+    <outline id="cloudflare-blog" text="Cloudflare Blog" title="Cloudflare Blog" xmlUrl="https://blog.cloudflare.com/rss/" htmlUrl="https://blog.cloudflare.com/"/>
+    <outline id="aws-architecture" text="AWS Architecture Blog" title="AWS Architecture Blog" xmlUrl="https://aws.amazon.com/blogs/architecture/feed/" htmlUrl="https://aws.amazon.com/blogs/architecture/"/>
+  </outline>
+</body></opml>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0"><head><title>Company Engineering</title></head><body>
+  <outline text="Company Engineering">
+    <outline id="bol-techlab" text="bol Techlab" title="bol Techlab" xmlUrl="https://techlab.bol.com/feed/" htmlUrl="https://techlab.bol.com/" folder="Company Engineering/bol.com"/>
+    <outline id="weaviate-blog" text="Weaviate Blog" title="Weaviate Blog" xmlUrl="https://weaviate.io/blog/rss.xml" htmlUrl="https://weaviate.io/blog" folder="Company Engineering/Weaviate"/>
+  </outline>
+</body></opml>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0"><head><title>Algorithms and Problem Solving</title></head><body>
+  <outline text="Data Structures, Algorithms, and Problem Solving">
+    <outline id="eli-bendersky" text="Eli Bendersky" title="Eli Bendersky" xmlUrl="https://eli.thegreenplace.net/feeds/all.atom.xml" htmlUrl="https://eli.thegreenplace.net/"/>
+    <outline id="jeremy-kun" text="Jeremy Kun" title="Jeremy Kun" xmlUrl="https://www.jeremykun.com/feed/" htmlUrl="https://www.jeremykun.com/"/>
+    <outline id="daniel-lemire" text="Daniel Lemire" title="Daniel Lemire" xmlUrl="https://lemire.me/blog/feed/" htmlUrl="https://lemire.me/blog/"/>
+    <outline id="quanta-computer-science" text="Quanta Magazine: Computer Science" title="Quanta Magazine: Computer Science" xmlUrl="https://www.quantamagazine.org/computer-science/feed/" htmlUrl="https://www.quantamagazine.org/computer-science/"/>
+  </outline>
+</body></opml>
