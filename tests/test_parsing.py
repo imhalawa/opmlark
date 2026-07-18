@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from article_importer.configuration import ConfigurationError, load_config
 from article_importer.models import FeedSubscription
@@ -109,7 +110,9 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual(articles, loaded.articles_path)
         self.assertEqual(str(self.temp / "tools" / "defuddle.exe"), loaded.defuddle_executable)
 
-    def test_config_keeps_bare_executable_for_path_resolution(self) -> None:
+    @patch("article_importer.configuration.shutil.which")
+    def test_config_resolves_bare_executable_from_path(self, which: object) -> None:
+        which.return_value = "C:/tools/defuddle.cmd"
         vault = self.temp / "vault"
         (vault / "Sources" / "Articles").mkdir(parents=True)
         config = self.temp / "config.toml"
@@ -120,7 +123,7 @@ class ParsingTests(unittest.TestCase):
 
         loaded = load_config(config)
 
-        self.assertEqual("defuddle", loaded.defuddle_executable)
+        self.assertEqual("C:/tools/defuddle.cmd", loaded.defuddle_executable)
 
     def test_config_reads_positive_lookback_days(self) -> None:
         vault = self.temp / "vault"

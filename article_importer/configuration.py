@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import shutil
 import tomllib
 
 
@@ -61,4 +62,4 @@ def _resolve_executable(value: str, base_path: Path) -> str:
     path = Path(value)
     if path.is_absolute() or "/" in value or "\\" in value:
         return str(_resolve_path(value, base_path))
-    return value
+    return shutil.which(value) or value
