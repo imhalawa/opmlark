@@ -10,7 +10,11 @@ from unittest.mock import Mock, patch
 
 from article_importer.defuddle import DefuddledArticle, run_defuddle
 from article_importer.models import FeedEntry, FeedSubscription
-from article_importer.notes import build_frontmatter, create_note
+from article_importer.notes import (
+    add_article_type_to_imported_notes,
+    build_frontmatter,
+    create_note,
+)
 
 
 NOW = datetime(2026, 7, 18, 7, 0, tzinfo=timezone.utc)
@@ -141,6 +145,7 @@ class NotesTests(unittest.TestCase):
         self.assertTrue(saved.endswith(body))
         self.assertEqual(
             "---\n"
+            'type: "article"\n'
             'title: "A title"\n'
             'source: "https://example.test/article"\n'
             'feed: "Publisher"\n'
@@ -156,6 +161,82 @@ class NotesTests(unittest.TestCase):
             "---\n",
             saved[: -len(body)],
         )
+
+    def test_add_article_type_updates_only_marked_notes_without_a_type(self) -> None:
+        note = self.articles / "Article - imported.md"
+        original_body = "## Original\n\nunchanged\n"
+        note.write_text(
+            "---\n"
+            'title: "Imported"\n'
+            "ingested_by: opml-defuddle-articles\n"
+            "---\n"
+            + original_body,
+            encoding="utf-8",
+            newline="",
+        )
+        (self.articles / "ordinary.md").write_text(
+            "---\n"
+            'title: "Ordinary"\n'
+            "---\n"
+            "untouched\n",
+            encoding="utf-8",
+            newline="",
+        )
+        typed_note = self.articles / "Article - typed.md"
+        typed_note.write_text(
+            "---\n"
+            'type: "article"\n'
+            "ingested_by: opml-defuddle-articles\n"
+            "---\n"
+            "already typed\n",
+            encoding="utf-8",
+            newline="",
+        )
+
+        updated = add_article_type_to_imported_notes(self.articles)
+
+        self.assertEqual(1, updated)
+        saved = note.read_text(encoding="utf-8")
+        self.assertIn('type: "article"\n', saved)
+        self.assertEqual(original_body, saved.split("---\n", 2)[2])
+        self.assertNotIn('type: "article"', (self.articles / "ordinary.md").read_text(encoding="utf-8"))
+        self.assertEqual(
+            "already typed\n", typed_note.read_text(encoding="utf-8").split("---\n", 2)[2]
+        )
+
+    def test_add_article_type_is_idempotent(self) -> None:
+        note = self.articles / "Article - imported.md"
+        note.write_text(
+            "---\n"
+            "ingested_by: opml-defuddle-articles\n"
+            "---\n"
+            "body\n",
+            encoding="utf-8",
+            newline="",
+        )
+
+        add_article_type_to_imported_notes(self.articles)
+        contents_after_first_run = note.read_bytes()
+
+        self.assertEqual(0, add_article_type_to_imported_notes(self.articles))
+        self.assertEqual(contents_after_first_run, note.read_bytes())
+
+    @patch("article_importer.notes.Path.replace", side_effect=OSError("disk full"))
+    def test_add_article_type_keeps_original_note_when_atomic_replace_fails(self, replace: Mock) -> None:
+        note = self.articles / "Article - imported.md"
+        original = (
+            "---\n"
+            "ingested_by: opml-defuddle-articles\n"
+            "---\n"
+            "body\n"
+        ).encode()
+        note.write_bytes(original)
+
+        with self.assertRaisesRegex(OSError, "disk full"):
+            add_article_type_to_imported_notes(self.articles)
+
+        self.assertEqual(original, note.read_bytes())
+        replace.assert_called_once()
 
     def test_note_uses_incrementing_name_when_title_collides(self) -> None:
         frontmatter = build_frontmatter(ARTICLE, ENTRY, NOW)

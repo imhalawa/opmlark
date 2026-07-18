@@ -203,6 +203,34 @@ class FetchArticlesCliTests(unittest.TestCase):
         self.assertEqual(0, exit_code)
         self.assertFalse((self.root / "data").exists())
 
+    def test_cli_add_article_type_migrates_notes_without_importing(self) -> None:
+        migration = Mock(return_value=3)
+        output = StringIO()
+
+        with (
+            patch.object(self.script, "load_config", return_value=self.config),
+            patch.object(self.script, "add_article_type_to_imported_notes", migration),
+            patch.object(self.script, "parse_opml") as parse_opml,
+            patch.object(self.script, "ImportService") as service,
+            contextlib.redirect_stdout(output),
+        ):
+            exit_code = self.script.main(["--add-article-type"])
+
+        self.assertEqual(0, exit_code)
+        migration.assert_called_once_with(self.articles)
+        parse_opml.assert_not_called()
+        service.assert_not_called()
+        self.assertEqual("updated=3\n", output.getvalue())
+
+    def test_cli_rejects_article_type_migration_in_a_dry_run(self) -> None:
+        output = StringIO()
+
+        with contextlib.redirect_stdout(output):
+            exit_code = self.script.main(["--dry-run", "--add-article-type"])
+
+        self.assertEqual(1, exit_code)
+        self.assertIn("cannot be combined", output.getvalue())
+
 
 def _load_fetch_articles() -> object:
     script_path = Path(__file__).parents[1] / "fetch_articles.py"
