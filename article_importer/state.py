@@ -20,15 +20,16 @@ class StateStore:
     """Persist feed observations and article import outcomes in SQLite."""
 
     def __init__(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self._connection = sqlite3.connect(path, isolation_level=None)
-        self._create_schema()
+        self._path = path
+        self._connection: sqlite3.Connection | None = None
 
     def __enter__(self) -> StateStore:
         return self
 
     def __exit__(self, exception_type: object, exception: object, traceback: object) -> None:
-        self._connection.close()
+        if self._connection is not None:
+            self._connection.close()
+            self._connection = None
 
     def candidates(
         self,
@@ -42,18 +43,22 @@ class StateStore:
         observations surface new articles and prior failures for processing.
         """
         visible_entries = _unique_entries(entries)
+        if dry_run:
+            return self._dry_run_candidates(subscription, visible_entries)
+
         timestamp = _utc_timestamp()
-        self._connection.execute("BEGIN")
+        connection = self._mutable_connection()
+        connection.execute("BEGIN")
         try:
-            existing_feed = self._connection.execute(
+            existing_feed = connection.execute(
                 "SELECT 1 FROM feeds WHERE feed_url = ?", (subscription.feed_url,)
             ).fetchone()
             if existing_feed is None:
-                self._connection.execute(
+                connection.execute(
                     "INSERT INTO feeds(feed_url, name, topic, initialized_at) VALUES (?, ?, ?, ?)",
                     (subscription.feed_url, subscription.name, subscription.topic, timestamp),
                 )
-                self._connection.executemany(
+                connection.executemany(
                     """
                     INSERT INTO entries(
                         feed_url, article_url, title, published, status, output_path,
@@ -76,12 +81,12 @@ class StateStore:
             else:
                 candidates: list[FeedEntry] = []
                 for entry in visible_entries:
-                    row = self._connection.execute(
+                    row = connection.execute(
                         "SELECT status FROM entries WHERE feed_url = ? AND article_url = ?",
                         (subscription.feed_url, entry.url),
                     ).fetchone()
                     if row is None:
-                        self._connection.execute(
+                        connection.execute(
                             """
                             INSERT INTO entries(
                                 feed_url, article_url, title, published, status, output_path,
@@ -102,13 +107,10 @@ class StateStore:
                         candidates.append(entry)
                 batch = FeedBatch(False, 0, tuple(candidates))
 
-            if dry_run:
-                self._connection.rollback()
-            else:
-                self._connection.commit()
+            connection.commit()
             return batch
         except BaseException:
-            self._connection.rollback()
+            connection.rollback()
             raise
 
     def mark_imported(self, feed_url: str, article_url: str, output_path: str) -> None:
@@ -131,8 +133,54 @@ class StateStore:
             error_message=error,
         )
 
-    def _create_schema(self) -> None:
-        self._connection.executescript(
+    def _dry_run_candidates(
+        self, subscription: FeedSubscription, visible_entries: tuple[FeedEntry, ...]
+    ) -> FeedBatch:
+        if not self._path.is_file():
+            return FeedBatch(True, len(visible_entries), ())
+
+        connection = sqlite3.connect(f"{self._path.resolve().as_uri()}?mode=ro", uri=True)
+        try:
+            tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            if "feeds" not in tables:
+                return FeedBatch(True, len(visible_entries), ())
+
+            existing_feed = connection.execute(
+                "SELECT 1 FROM feeds WHERE feed_url = ?", (subscription.feed_url,)
+            ).fetchone()
+            if existing_feed is None:
+                return FeedBatch(True, len(visible_entries), ())
+            if "entries" not in tables:
+                return FeedBatch(False, 0, visible_entries)
+
+            candidates = tuple(
+                entry
+                for entry in visible_entries
+                if (row := connection.execute(
+                    "SELECT status FROM entries WHERE feed_url = ? AND article_url = ?",
+                    (subscription.feed_url, entry.url),
+                ).fetchone()) is None
+                or row[0] == "failed"
+            )
+            return FeedBatch(False, 0, candidates)
+        finally:
+            connection.close()
+
+    def _mutable_connection(self) -> sqlite3.Connection:
+        if self._connection is None:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._connection = sqlite3.connect(self._path, isolation_level=None)
+            self._create_schema(self._connection)
+        return self._connection
+
+    @staticmethod
+    def _create_schema(connection: sqlite3.Connection) -> None:
+        connection.executescript(
             """
             CREATE TABLE IF NOT EXISTS feeds(
                 feed_url TEXT PRIMARY KEY,
@@ -165,19 +213,28 @@ class StateStore:
         error_message: str | None,
     ) -> None:
         timestamp = _utc_timestamp()
-        self._connection.execute("BEGIN")
+        connection = self._mutable_connection()
+        connection.execute("BEGIN")
         try:
-            self._connection.execute(
+            connection.execute(
                 """
                 INSERT INTO entries(
                     feed_url, article_url, title, published, status, output_path,
                     error_message, seen_at, updated_at
                 ) VALUES (?, ?, '', NULL, ?, ?, ?, ?, ?)
                 ON CONFLICT(feed_url, article_url) DO UPDATE SET
-                    status = excluded.status,
-                    output_path = excluded.output_path,
-                    error_message = excluded.error_message,
-                    updated_at = excluded.updated_at
+                    status = CASE
+                        WHEN entries.status = 'imported' AND excluded.status = 'failed'
+                        THEN entries.status ELSE excluded.status END,
+                    output_path = CASE
+                        WHEN entries.status = 'imported' AND excluded.status = 'failed'
+                        THEN entries.output_path ELSE excluded.output_path END,
+                    error_message = CASE
+                        WHEN entries.status = 'imported' AND excluded.status = 'failed'
+                        THEN entries.error_message ELSE excluded.error_message END,
+                    updated_at = CASE
+                        WHEN entries.status = 'imported' AND excluded.status = 'failed'
+                        THEN entries.updated_at ELSE excluded.updated_at END
                 """,
                 (
                     feed_url,
@@ -189,9 +246,9 @@ class StateStore:
                     timestamp,
                 ),
             )
-            self._connection.commit()
+            connection.commit()
         except BaseException:
-            self._connection.rollback()
+            connection.rollback()
             raise
 
 
@@ -208,9 +265,10 @@ def _unique_entries(entries: Iterable[FeedEntry]) -> tuple[FeedEntry, ...]:
 def _published_value(entry: FeedEntry) -> str | None:
     if entry.published is None:
         return None
-    if entry.published.tzinfo is None:
-        return entry.published.isoformat()
-    return entry.published.astimezone(timezone.utc).isoformat()
+    published = entry.published
+    if published.tzinfo is None:
+        published = published.replace(tzinfo=timezone.utc)
+    return published.astimezone(timezone.utc).isoformat()
 
 
 def _utc_timestamp() -> str:
