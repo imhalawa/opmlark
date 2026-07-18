@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 from tempfile import NamedTemporaryFile
+from urllib.parse import urlsplit
 
 from article_importer.defuddle import DefuddledArticle
 from article_importer.models import FeedEntry
@@ -90,11 +91,13 @@ def add_topics_to_legacy_articles(articles_path: Path) -> int:
 def create_note(articles_path: Path, frontmatter: str, markdown: str) -> Path:
     """Write a note once, choosing a numbered name if the title already exists."""
     title = _safe_title(_frontmatter_title(frontmatter))
+    folder = articles_path / source_folder_for_note(frontmatter)
+    folder.mkdir(parents=True, exist_ok=True)
     suffix_number = 1
     while True:
         suffix = "" if suffix_number == 1 else f" ({suffix_number})"
         name = f"Article - {title[: 140 - len(suffix)]}{suffix}.md"
-        output = articles_path / name
+        output = folder / name
         try:
             with output.open("x", encoding="utf-8", newline="") as note:
                 note.write(frontmatter + markdown)
@@ -107,7 +110,7 @@ def find_note_for_source(articles_path: Path, source_url: str) -> Path | None:
     """Find any existing article note whose frontmatter has *source_url*."""
     source_line = f"source: {_yaml_scalar(source_url)}"
     unquoted_source_line = f"source: {source_url}"
-    for path in articles_path.glob("*.md"):
+    for path in articles_path.rglob("*.md"):
         try:
             contents = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
@@ -123,6 +126,44 @@ def find_note_for_source(articles_path: Path, source_url: str) -> Path | None:
         ):
             return path
     return None
+
+
+def source_folder_for_note(frontmatter: str) -> str:
+    """Resolve an article's source folder from its existing frontmatter."""
+    feed = _frontmatter_scalar(frontmatter, "feed")
+    if feed:
+        return _safe_folder_name(feed)
+    source = _frontmatter_scalar(frontmatter, "source")
+    hostname = urlsplit(source).hostname if source else None
+    return _safe_folder_name(hostname) if hostname else "Unknown Source"
+
+
+def group_articles_by_source(articles_path: Path, state_path: Path) -> int:
+    """Move root-level article notes under source folders and repair state paths."""
+    paths = tuple(path for path in articles_path.glob("*.md") if path.is_file())
+    state = None
+    if state_path.is_file():
+        from article_importer.state import StateStore
+
+        state = StateStore(state_path)
+        state.__enter__()
+    try:
+        for path in paths:
+            contents = path.read_text(encoding="utf-8")
+            target_folder = articles_path / source_folder_for_note(_frontmatter_contents(contents))
+            target_folder.mkdir(parents=True, exist_ok=True)
+            target = _next_available_path(target_folder, path.name)
+            path.replace(target)
+            try:
+                if state is not None:
+                    state.update_output_path(str(path), str(target))
+            except BaseException:
+                target.replace(path)
+                raise
+    finally:
+        if state is not None:
+            state.__exit__(None, None, None)
+    return len(paths)
 
 
 def _yaml_scalar(value: str) -> str:
@@ -209,17 +250,45 @@ def _tag(topic: str) -> str:
 
 
 def _frontmatter_title(frontmatter: str) -> str:
-    match = re.search(r'^title: (.+)$', frontmatter, flags=re.MULTILINE)
-    if not match:
-        return "Untitled article"
+    title = _frontmatter_scalar(frontmatter, "title")
+    return title or "Untitled article"
+
+
+def _frontmatter_scalar(frontmatter: str, name: str) -> str | None:
+    match = re.search(rf"^{re.escape(name)}:\s*(.+)$", frontmatter, flags=re.MULTILINE)
+    if match is None:
+        return None
     try:
         title = json.loads(match.group(1))
     except json.JSONDecodeError:
-        return "Untitled article"
-    return title if isinstance(title, str) else "Untitled article"
+        title = match.group(1).strip()
+    return title if isinstance(title, str) and title else None
 
 
 def _safe_title(title: str) -> str:
     safe = _WINDOWS_UNSAFE.sub("_", title)
     safe = _TRAILING_WINDOWS_UNSAFE.sub("_", safe).strip()
     return safe or "Untitled article"
+
+
+def _safe_folder_name(name: str) -> str:
+    safe = _WINDOWS_UNSAFE.sub("_", name)
+    safe = _TRAILING_WINDOWS_UNSAFE.sub("_", safe).strip()
+    return safe or "Unknown Source"
+
+
+def _frontmatter_contents(contents: str) -> str:
+    opening = _FRONTMATTER_OPENING.match(contents)
+    if opening is None:
+        return ""
+    closing = _FRONTMATTER_CLOSING.search(contents, opening.end())
+    return contents[opening.end() : closing.start()] if closing is not None else ""
+
+
+def _next_available_path(folder: Path, name: str) -> Path:
+    candidate = folder / name
+    suffix_number = 2
+    while candidate.exists():
+        candidate = folder / f"{Path(name).stem} ({suffix_number}){Path(name).suffix}"
+        suffix_number += 1
+    return candidate

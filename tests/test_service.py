@@ -64,7 +64,8 @@ class ImportServiceTests(unittest.TestCase):
         summary = self.service.run(dry_run=False)
 
         self.assertEqual(1, summary.imported)
-        note = next(self.articles.glob("Article - *.md"))
+        note = next(self.articles.rglob("Article - *.md"))
+        self.assertEqual(self.articles / "Example", note.parent)
         self.assertIn("ingested_by: opml-defuddle-articles", note.read_text(encoding="utf-8"))
 
     def test_bad_feed_does_not_prevent_other_feed(self) -> None:
@@ -128,13 +129,13 @@ class ImportServiceTests(unittest.TestCase):
             failed = self.service.run(dry_run=False)
 
         self.assertEqual(1, failed.failed_entries)
-        self.assertEqual(1, len(list(self.articles.glob("Article - *.md"))))
+        self.assertEqual(1, len(list(self.articles.rglob("Article - *.md"))))
         calls_after_failed_run = self.defuddle.call_count
 
         recovered = self.service.run(dry_run=False)
 
         self.assertEqual(0, recovered.failed_entries)
-        self.assertEqual(1, len(list(self.articles.glob("Article - *.md"))))
+        self.assertEqual(1, len(list(self.articles.rglob("Article - *.md"))))
         self.assertEqual(calls_after_failed_run, self.defuddle.call_count)
 
 
@@ -249,6 +250,36 @@ class FetchArticlesCliTests(unittest.TestCase):
         parse_opml.assert_not_called()
         service.assert_not_called()
         self.assertEqual("updated=3\n", output.getvalue())
+
+    def test_cli_groups_articles_by_source_without_importing(self) -> None:
+        migration = Mock(return_value=3)
+        output = StringIO()
+
+        with (
+            patch.object(self.script, "load_config", return_value=self.config),
+            patch.object(self.script, "group_articles_by_source", migration),
+            patch.object(self.script, "parse_opml") as parse_opml,
+            patch.object(self.script, "ImportService") as service,
+            contextlib.redirect_stdout(output),
+        ):
+            exit_code = self.script.main(["--group-by-source"])
+
+        self.assertEqual(0, exit_code)
+        migration.assert_called_once_with(
+            self.articles, self.root / "data" / "articles.sqlite3"
+        )
+        parse_opml.assert_not_called()
+        service.assert_not_called()
+        self.assertEqual("moved=3\n", output.getvalue())
+
+    def test_cli_rejects_group_by_source_in_a_dry_run(self) -> None:
+        output = StringIO()
+
+        with contextlib.redirect_stdout(output):
+            exit_code = self.script.main(["--dry-run", "--group-by-source"])
+
+        self.assertEqual(1, exit_code)
+        self.assertIn("cannot be combined", output.getvalue())
 
 
 def _load_fetch_articles() -> object:

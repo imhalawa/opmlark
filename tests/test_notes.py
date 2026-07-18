@@ -15,7 +15,10 @@ from article_importer.notes import (
     add_topics_to_legacy_articles,
     build_frontmatter,
     create_note,
+    group_articles_by_source,
+    source_folder_for_note,
 )
+from article_importer.state import StateStore
 
 
 NOW = datetime(2026, 7, 18, 7, 0, tzinfo=timezone.utc)
@@ -162,6 +165,73 @@ class NotesTests(unittest.TestCase):
             "---\n",
             saved[: -len(body)],
         )
+
+    def test_source_folder_uses_feed_then_source_hostname_then_unknown(self) -> None:
+        self.assertEqual("ByteByteGo", source_folder_for_note('feed: "ByteByteGo"'))
+        self.assertEqual(
+            "stephango.com",
+            source_folder_for_note('source: "https://stephango.com/post"'),
+        )
+        self.assertEqual("Unknown Source", source_folder_for_note("title: Missing"))
+
+    def test_note_is_created_in_its_feed_source_folder(self) -> None:
+        output = create_note(
+            self.articles, build_frontmatter(ARTICLE, ENTRY, NOW), ARTICLE.markdown
+        )
+
+        self.assertEqual(self.articles / "Publisher" / "Article - A title.md", output)
+
+    def test_group_articles_moves_root_note_without_changing_bytes_or_losing_state(self) -> None:
+        note = self.articles / "legacy.md"
+        original_bytes = (
+            b'---\nfeed: "Publisher"\nsource: "https://example.test/article"\n---\n'
+            b"# Exact article body\n"
+        )
+        note.write_bytes(original_bytes)
+        state_path = self.articles.parent / "data" / "articles.sqlite3"
+        with StateStore(state_path) as state:
+            state.candidates(SUBSCRIPTION, [ENTRY])
+            state.mark_imported(SUBSCRIPTION.feed_url, ENTRY.url, str(note))
+
+        updated = group_articles_by_source(self.articles, state_path)
+        moved_path = self.articles / "Publisher" / note.name
+        with StateStore(state_path) as state:
+            stored_output_path = state.imported_output_path(ENTRY.url)
+
+        self.assertEqual(1, updated)
+        self.assertEqual(original_bytes, moved_path.read_bytes())
+        self.assertEqual(str(moved_path), stored_output_path)
+
+    def test_group_articles_uses_a_numbered_name_for_a_collision(self) -> None:
+        note = self.articles / "legacy.md"
+        note.write_text('---\nfeed: "Publisher"\n---\nbody\n', encoding="utf-8")
+        target = self.articles / "Publisher"
+        target.mkdir()
+        (target / note.name).write_text("existing\n", encoding="utf-8")
+
+        updated = group_articles_by_source(self.articles, self.articles / "missing.sqlite3")
+
+        self.assertEqual(1, updated)
+        self.assertTrue((target / "legacy (2).md").is_file())
+
+    def test_group_articles_restores_note_when_state_path_update_fails(self) -> None:
+        note = self.articles / "legacy.md"
+        original_bytes = b'---\nfeed: "Publisher"\n---\n# Exact article body\n'
+        note.write_bytes(original_bytes)
+        state_path = self.articles.parent / "data" / "articles.sqlite3"
+        with StateStore(state_path) as state:
+            state.candidates(SUBSCRIPTION, [ENTRY])
+            state.mark_imported(SUBSCRIPTION.feed_url, ENTRY.url, str(note))
+
+        with patch(
+            "article_importer.state.StateStore.update_output_path",
+            side_effect=OSError("database is unavailable"),
+        ):
+            with self.assertRaisesRegex(OSError, "database is unavailable"):
+                group_articles_by_source(self.articles, state_path)
+
+        self.assertEqual(original_bytes, note.read_bytes())
+        self.assertFalse((self.articles / "Publisher" / note.name).exists())
 
     def test_add_article_type_updates_only_marked_notes_without_a_type(self) -> None:
         note = self.articles / "Article - imported.md"

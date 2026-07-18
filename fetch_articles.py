@@ -6,7 +6,11 @@ from pathlib import Path
 import xml.etree.ElementTree as ElementTree
 
 from article_importer.configuration import ConfigurationError, load_config
-from article_importer.notes import add_article_type_to_imported_notes, add_topics_to_legacy_articles
+from article_importer.notes import (
+    add_article_type_to_imported_notes,
+    add_topics_to_legacy_articles,
+    group_articles_by_source,
+)
 from article_importer.parsing import parse_opml
 from article_importer.service import ImportService, RunSummary
 
@@ -29,13 +33,18 @@ def main(arguments: list[str] | None = None) -> int:
         action="store_true",
         help="Add inferred topics to existing non-importer article notes",
     )
+    parser.add_argument(
+        "--group-by-source",
+        action="store_true",
+        help="Move root-level article notes into source-named folders",
+    )
     args = parser.parse_args(arguments)
-    migrations = args.add_article_type or args.add_topics
+    migrations = args.add_article_type or args.add_topics or args.group_by_source
     if args.dry_run and migrations:
         print("ERROR: --dry-run cannot be combined with a frontmatter migration")
         return 1
-    if args.add_article_type and args.add_topics:
-        print("ERROR: --add-article-type and --add-topics cannot be combined")
+    if sum((args.add_article_type, args.add_topics, args.group_by_source)) > 1:
+        print("ERROR: frontmatter and article organization migrations cannot be combined")
         return 1
 
     project_root = Path(__file__).resolve().parent
@@ -57,6 +66,17 @@ def main(arguments: list[str] | None = None) -> int:
             print(f"ERROR: {error}")
             return 1
         print(f"updated={updated}")
+        return 0
+    if args.group_by_source:
+        try:
+            config = load_config(config_path)
+            moved = group_articles_by_source(
+                config.articles_path, project_root / "data" / "articles.sqlite3"
+            )
+        except (ConfigurationError, OSError) as error:
+            print(f"ERROR: {error}")
+            return 1
+        print(f"moved={moved}")
         return 0
 
     data_path = project_root / "data"
