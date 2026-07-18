@@ -5,6 +5,7 @@ import importlib.util
 from datetime import datetime, timezone
 from email.utils import format_datetime
 from io import StringIO
+import logging
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -35,7 +36,13 @@ class ImportServiceTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
 
-    def _service(self, subscriptions: list[FeedSubscription]) -> ImportService:
+    def _service(
+        self,
+        subscriptions: list[FeedSubscription],
+        *,
+        progress: object | None = None,
+        logger: logging.Logger | None = None,
+    ) -> ImportService:
         config = ImporterConfig(
             vault_path=self.articles.parents[2],
             articles_path=self.articles,
@@ -48,6 +55,8 @@ class ImportServiceTests(unittest.TestCase):
             self.articles.parents[2] / "data" / "articles.sqlite3",
             fetch_bytes=self.fetcher,
             defuddle=self.defuddle,
+            progress=progress,
+            logger=logger,
         )
 
     def test_first_run_seeds_without_defuddle(self) -> None:
@@ -67,6 +76,30 @@ class ImportServiceTests(unittest.TestCase):
         note = next(self.articles.rglob("Article - *.md"))
         self.assertEqual(self.articles / "Example", note.parent)
         self.assertIn("ingested_by: opml-defuddle-articles", note.read_text(encoding="utf-8"))
+
+    def test_emits_progress_for_feed_and_imported_article(self) -> None:
+        events: list[str] = []
+        self.service = self._service([GOOD_FEED], progress=events.append)
+        self.service.run(dry_run=False)
+        self.fetcher.return_value = _with_recent_entries(RSS_WITH_NEW_ENTRY)
+
+        self.service.run(dry_run=False)
+
+        self.assertIn("Starting import: 1 feeds, 90-day lookback", events)
+        self.assertIn("[1/1] Fetching Example", events)
+        self.assertIn("Defuddling: https://example.test/new", events)
+        self.assertIn("Imported: An article", events)
+
+    def test_records_progress_events_in_the_logger(self) -> None:
+        log_output = StringIO()
+        logger = logging.Logger("test.import-progress", level=logging.INFO)
+        logger.addHandler(logging.StreamHandler(log_output))
+        self.service = self._service([GOOD_FEED], logger=logger)
+
+        self.service.run(dry_run=False)
+
+        self.assertIn("Starting import: 1 feeds, 90-day lookback", log_output.getvalue())
+        self.assertIn("[1/1] Fetching Example", log_output.getvalue())
 
     def test_bad_feed_does_not_prevent_other_feed(self) -> None:
         self.fetcher.side_effect = lambda url: (
@@ -173,6 +206,21 @@ class FetchArticlesCliTests(unittest.TestCase):
         self.assertIn(
             "Import summary: seeded=2 imported=1 failed_entries=0 failed_feeds=0",
             (self.root / "data" / "importer.log").read_text(encoding="utf-8"),
+        )
+
+    def test_cli_passes_a_flushed_console_progress_reporter(self) -> None:
+        service = Mock()
+        service.run.return_value = RunSummary()
+
+        with (
+            patch.object(self.script, "load_config", return_value=self.config),
+            patch.object(self.script, "parse_catalogs", return_value=[]),
+            patch.object(self.script, "ImportService", return_value=service) as constructor,
+        ):
+            self.script.main([])
+
+        self.assertIs(
+            constructor.call_args.kwargs["progress"], self.script._print_progress
         )
 
     def test_cli_returns_one_for_invalid_configuration(self) -> None:

@@ -116,6 +116,7 @@ def main(arguments: list[str] | None = None) -> int:
             subscriptions,
             data_path / "articles.sqlite3",
             logger=logger,
+            progress=_print_progress,
         )
         summary = service.run(dry_run=args.dry_run)
     except (CatalogError, ConfigurationError, OSError, ElementTree.ParseError) as error:
@@ -165,6 +166,10 @@ def _summary_message(summary: RunSummary) -> str:
         f"failed_entries={summary.failed_entries} failed_feeds={summary.failed_feeds} "
         f"would_import={summary.would_import} would_retry={summary.would_retry}"
     )
+
+
+def _print_progress(message: str) -> None:
+    print(message, flush=True)
 
 
 if __name__ == "__main__":
