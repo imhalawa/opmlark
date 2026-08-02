@@ -217,7 +217,7 @@ npm run smoke
 npm pack --dry-run
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and [CONTEXT.md](CONTEXT.md) for the project language.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow, [docs/architecture.md](docs/architecture.md) for the system design, and [CONTEXT.md](CONTEXT.md) for the project language.
 
 ## License
 
