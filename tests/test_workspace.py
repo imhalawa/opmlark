@@ -83,7 +83,7 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_init_creates_generic_markdown_workspace(self) -> None:
         with TemporaryDirectory() as directory:
-            root = Path(directory) / "library"
+            root = (Path(directory) / "library").resolve()
 
             created = initialize_workspace(root, "markdown/articles")
             config = load_config(Path(created["config"]))

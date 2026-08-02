@@ -21,7 +21,7 @@ from tests.fixtures import (
 class ParsingTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = TemporaryDirectory()
-        self.temp = Path(self.temporary_directory.name)
+        self.temp = Path(self.temporary_directory.name).resolve()
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()

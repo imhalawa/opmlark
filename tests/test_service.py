@@ -179,7 +179,7 @@ if __name__ == "__main__":
 class FetchArticlesCliTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = TemporaryDirectory()
-        self.root = Path(self.temporary_directory.name)
+        self.root = Path(self.temporary_directory.name).resolve()
         self.articles = self.root / "vault" / "Sources" / "Articles"
         self.articles.mkdir(parents=True)
         self.config = ImporterConfig(self.articles.parents[2], self.articles, "defuddle")
