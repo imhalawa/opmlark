@@ -57,10 +57,11 @@ For regular use, install the command globally:
 ```sh
 npm install --global opmlark
 opmlark doctor
-opmlark schedule install --time 07:00
+opmlark schedule add morning --daily --at 07:00
+opmlark schedule status
 ```
 
-The schedule command creates or updates a Windows Scheduled Task on Windows and an idempotent crontab entry on macOS and Linux. A global installation is recommended because scheduled jobs need a stable executable path.
+Schedule commands reconcile portable workspace configuration into Windows Task Scheduler, a per-user macOS LaunchAgent, or the Linux user crontab. A global installation is required because background jobs need a stable executable path.
 
 ## Workspace
 
@@ -138,6 +139,45 @@ opmlark article read --url "https://example.com/article" --json
 
 An AI workflow should first query this structured metadata, then read only the selected Markdown files. OPMLark does not generate or store summaries.
 
+### Multiple schedules
+
+Every workspace can define as many named schedules as needed. The CLI and TUI edit the same `[[schedules]]` configuration and immediately reconcile it with the current operating system:
+
+```sh
+opmlark schedule add morning --daily --at 07:00
+opmlark schedule add weekdays --weekly mon,wed,fri --at 17:30
+opmlark schedule add monthly-review --monthly 1 --at 18:00
+opmlark schedule add conference --once 2026-09-15 --at 12:00
+
+opmlark schedule list
+opmlark schedule status
+opmlark schedule disable weekdays
+opmlark schedule edit morning --daily --at 06:30
+opmlark schedule apply
+opmlark schedule remove conference
+```
+
+The equivalent configuration is portable:
+
+```toml
+[[schedules]]
+id = "morning"
+frequency = "daily"
+at = "07:00"
+
+[[schedules]]
+id = "weekdays"
+frequency = "weekly"
+days = ["mon", "wed", "fri"]
+at = "17:30"
+```
+
+Supported recurrences are daily, weekly, monthly on a calendar day, and once on an ISO date. Times use the host's local timezone. Raw cron expressions are intentionally excluded because they cannot always be translated faithfully across the three schedulers.
+
+`schedule apply` repairs missing or changed native artifacts and removes stale OPMLark-owned entries. It never changes unrelated tasks. Missed-run behavior remains native to the operating system; the next successful ingestion still discovers eligible articles through the rolling lookback window.
+
+If two schedules overlap, the second invocation exits successfully with `skipped: already_running`. This prevents concurrent writes to the workspace database and article directory.
+
 ## Ingestion behavior
 
 Every run considers visible entries inside `lookback_days`. SQLite prevents repeat imports. Entries older than the cutoff are recorded as seeded. Failed entries retry up to `max_attempts`, then remain visible for inspection instead of breaking every scheduled run forever.
@@ -159,14 +199,14 @@ opmlark category list|add|rename|remove Manage nested categories
 opmlark feed list|add|remove    Manage subscriptions
 opmlark failure list|retry      Inspect or explicitly retry failed articles
 opmlark article list|search|read Query the collection without AI tokens
-opmlark schedule show|install|remove
+opmlark schedule list|add|edit|enable|disable|remove|apply|status
 ```
 
 ## Existing checkout compatibility
 
 The original project layout remains supported. Existing `vault_path`, `feeds/`, `run-import.ps1`, `install-scheduled-task.ps1`, `--validate-catalogs`, and migration commands continue to work. Existing notes marked `ingested_by: opml-defuddle-articles` remain recognized; new notes use `ingested_by: opmlark`.
 
-The legacy scheduled task can still be removed with `Unregister-ScheduledTask`; new installations should use `opmlark schedule remove`.
+The legacy scheduled task can still be removed with `Unregister-ScheduledTask`. `schedule show`, `schedule install --time 07:00`, and an unqualified `schedule remove` remain compatibility aliases for a schedule named `default`.
 
 ## Development
 

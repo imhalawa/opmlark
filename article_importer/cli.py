@@ -15,6 +15,7 @@ from article_importer import __version__
 from article_importer.configuration import ConfigurationError, Schedule, load_config
 from article_importer.library import LibraryError, list_articles, read_article, search_articles
 from article_importer.parsing import CatalogError, parse_catalogs
+from article_importer.run_lock import RunLock
 from article_importer.service import ImportService
 from article_importer.schedule_config import (
     add_schedule_config,
@@ -290,6 +291,17 @@ def _init(args: argparse.Namespace) -> int:
 
 def _run(args: argparse.Namespace) -> int:
     config_path = find_config(args.config)
+    if args.dry_run:
+        return _execute_run(args, config_path)
+    with RunLock(config_path.parent / "data" / "import.lock") as lock:
+        if not lock.acquired:
+            result = {"ok": True, "skipped": "already_running"}
+            _emit(result, args.json, lambda value: "Another ingestion run is active; skipped")
+            return 0
+        return _execute_run(args, config_path)
+
+
+def _execute_run(args: argparse.Namespace, config_path: Path) -> int:
     config = load_config(config_path)
     subscriptions = parse_catalogs(
         config.feed_catalogs, disabled_sources=config.disabled_sources
