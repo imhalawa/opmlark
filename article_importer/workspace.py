@@ -155,6 +155,16 @@ def add_catalog(
 
 
 def disable_catalog(config_path: Path, catalog_id: str) -> CatalogInfo:
+    return _set_catalog_enabled(config_path, catalog_id, False)
+
+
+def enable_catalog(config_path: Path, catalog_id: str) -> CatalogInfo:
+    return _set_catalog_enabled(config_path, catalog_id, True)
+
+
+def _set_catalog_enabled(
+    config_path: Path, catalog_id: str, enabled: bool
+) -> CatalogInfo:
     matches = [
         catalog
         for catalog in _catalogs(config_path, include_disabled=True)
@@ -176,14 +186,35 @@ def disable_catalog(config_path: Path, catalog_id: str) -> CatalogInfo:
         except (KeyError, IndexError, tomllib.TOMLDecodeError):
             continue
         if block_id == catalog_id:
+            enabled_value = "true" if enabled else "false"
             if re.search(r"(?m)^enabled\s*=", block):
-                updated = re.sub(r"(?m)^enabled\s*=.*$", "enabled = false", block)
+                updated = re.sub(
+                    r"(?m)^enabled\s*=.*$", f"enabled = {enabled_value}", block
+                )
             else:
-                updated = block.rstrip() + "\nenabled = false\n\n"
-            _replace_text(config_path, contents[: match.start()] + updated + contents[match.end() :])
+                updated = block.rstrip() + f"\nenabled = {enabled_value}\n\n"
+            new_contents = contents[: match.start()] + updated + contents[match.end() :]
+            if enabled:
+                new_contents = _remove_disabled_catalog(new_contents, catalog_id)
+            _replace_text(config_path, new_contents)
             catalog = matches[0]
-            return CatalogInfo(catalog.id, str(catalog.path), catalog.folder, False)
+            return CatalogInfo(catalog.id, str(catalog.path), catalog.folder, enabled)
     raise WorkspaceError(f"Unable to locate catalog configuration: {catalog_id}")
+
+
+def _remove_disabled_catalog(contents: str, catalog_id: str) -> str:
+    match = re.search(r"(?m)^disabled_catalogs\s*=\s*(\[[^\]]*\])\s*$", contents)
+    if match is None:
+        return contents
+    try:
+        values = tomllib.loads(f"values = {match.group(1)}")["values"]
+    except (KeyError, tomllib.TOMLDecodeError):
+        return contents
+    if not isinstance(values, list):
+        return contents
+    updated = [value for value in values if value != catalog_id]
+    replacement = "disabled_catalogs = " + json.dumps(updated)
+    return contents[: match.start()] + replacement + contents[match.end() :]
 
 
 def list_feeds(config_path: Path) -> tuple[FeedInfo, ...]:
@@ -223,6 +254,39 @@ def add_category(config_path: Path, catalog_id: str, category: str) -> dict[str,
     _category_node(body, category, create=True)
     _write_opml(tree, catalog.path)
     return {"catalog": catalog.id, "category": category}
+
+
+def remove_category(config_path: Path, catalog_id: str, category: str) -> dict[str, str]:
+    catalog = _one_catalog(config_path, catalog_id)
+    tree = ElementTree.parse(catalog.path)
+    parent, node = _find_category(_body(tree), category)
+    if len(node):
+        raise WorkspaceError("Only an empty category can be removed")
+    parent.remove(node)
+    _write_opml(tree, catalog.path)
+    return {"catalog": catalog.id, "category": category}
+
+
+def rename_category(
+    config_path: Path, catalog_id: str, category: str, name: str
+) -> dict[str, str]:
+    if not name.strip() or "/" in name:
+        raise WorkspaceError("New category name must be one non-empty name")
+    catalog = _one_catalog(config_path, catalog_id)
+    tree = ElementTree.parse(catalog.path)
+    parent, node = _find_category(_body(tree), category)
+    if any(
+        sibling is not node
+        and sibling.get("xmlUrl") is None
+        and (sibling.get("text") or "").strip() == name.strip()
+        for sibling in parent
+    ):
+        raise WorkspaceError(f"Category already exists beside it: {name}")
+    node.set("text", name.strip())
+    if node.get("title") is not None:
+        node.set("title", name.strip())
+    _write_opml(tree, catalog.path)
+    return {"catalog": catalog.id, "category": category, "name": name.strip()}
 
 
 def add_feed(
@@ -389,6 +453,30 @@ def _category_node(parent: ElementTree.Element, category: str, *, create: bool) 
             match = ElementTree.SubElement(current, "outline", {"text": part})
         current = match
     return current
+
+
+def _find_category(
+    parent: ElementTree.Element, category: str
+) -> tuple[ElementTree.Element, ElementTree.Element]:
+    current = parent
+    current_parent = parent
+    parts = [part.strip() for part in category.split("/")]
+    if not parts or any(not part for part in parts):
+        raise WorkspaceError("Category must contain non-empty slash-separated names")
+    for part in parts:
+        match = next(
+            (
+                child
+                for child in current
+                if child.get("xmlUrl") is None
+                and (child.get("text") or "").strip() == part
+            ),
+            None,
+        )
+        if match is None:
+            raise WorkspaceError(f"Unknown category: {category}")
+        current_parent, current = current, match
+    return current_parent, current
 
 
 def _collect_categories(

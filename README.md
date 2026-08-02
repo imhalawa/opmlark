@@ -154,8 +154,8 @@ opmlark init                    Create a workspace
 opmlark run [--dry-run]         Ingest or preview new articles
 opmlark status                  Show collection state
 opmlark doctor                  Check prerequisites
-opmlark catalog list|add|disable Manage OPML catalogs
-opmlark category list|add       Manage nested categories
+opmlark catalog list|add|enable|disable Manage OPML catalogs
+opmlark category list|add|rename|remove Manage nested categories
 opmlark feed list|add|remove    Manage subscriptions
 opmlark failure list|retry      Inspect or explicitly retry failed articles
 opmlark article list|search|read Query the collection without AI tokens

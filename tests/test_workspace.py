@@ -17,10 +17,13 @@ from article_importer.workspace import (
     add_feed,
     initialize_workspace,
     disable_catalog,
+    enable_catalog,
     list_catalogs,
     list_categories,
     list_feeds,
     remove_feed,
+    remove_category,
+    rename_category,
 )
 
 
@@ -33,11 +36,13 @@ class WorkspaceTests(unittest.TestCase):
                 config, catalog_id="engineering", folder="Engineering"
             )
             disabled = disable_catalog(config, "engineering")
+            enabled = enable_catalog(config, "engineering")
 
             self.assertTrue(Path(added.path).is_file())
             self.assertFalse(disabled.enabled)
             catalogs = {item.id: item for item in list_catalogs(config)}
-            self.assertFalse(catalogs["engineering"].enabled)
+            self.assertTrue(enabled.enabled)
+            self.assertTrue(catalogs["engineering"].enabled)
 
     def test_init_creates_generic_markdown_workspace(self) -> None:
         with TemporaryDirectory() as directory:
@@ -71,6 +76,12 @@ class WorkspaceTests(unittest.TestCase):
             )
             self.assertEqual(added, remove_feed(config, "example-engineering"))
             self.assertEqual((), list_feeds(config))
+            rename_category(
+                config, "reading", "Engineering/System Design", "Architecture"
+            )
+            remove_category(config, "reading", "Engineering/Architecture")
+            remove_category(config, "reading", "Engineering")
+            self.assertEqual((), list_categories(config))
 
     def test_duplicate_feed_id_is_rejected_across_catalog(self) -> None:
         with TemporaryDirectory() as directory:

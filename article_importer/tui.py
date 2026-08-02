@@ -40,6 +40,9 @@ def run_tui() -> int:
             "  [16] Show schedule\n"
             "  [17] Install schedule\n"
             "  [18] Remove schedule\n"
+            "  [19] Enable catalog\n"
+            "  [20] Remove empty category\n"
+            "  [21] Rename category\n"
             "  [q] Quit"
         )
         choice = _prompt("Choose", "1").lower()
@@ -121,6 +124,45 @@ def run_tui() -> int:
         elif choice == "18":
             if _prompt("Remove this workspace schedule?", "n").lower() == "y":
                 main(["schedule", "remove", "--config", str(config)])
+        elif choice == "19":
+            catalog_id = _prompt("Catalog id")
+            if catalog_id:
+                main(["catalog", "enable", "--id", catalog_id, "--config", str(config)])
+        elif choice == "20":
+            catalog_id = _prompt("Catalog id", "reading")
+            category = _prompt("Empty category path")
+            if category:
+                main(
+                    [
+                        "category",
+                        "remove",
+                        "--catalog",
+                        catalog_id,
+                        "--name",
+                        category,
+                        "--config",
+                        str(config),
+                    ]
+                )
+        elif choice == "21":
+            catalog_id = _prompt("Catalog id", "reading")
+            category = _prompt("Category path")
+            name = _prompt("New category name")
+            if category and name:
+                main(
+                    [
+                        "category",
+                        "rename",
+                        "--catalog",
+                        catalog_id,
+                        "--name",
+                        category,
+                        "--to",
+                        name,
+                        "--config",
+                        str(config),
+                    ]
+                )
         else:
             print("Unknown choice")
 

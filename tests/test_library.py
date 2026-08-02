@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from article_importer.library import list_articles, read_article, search_articles
+from article_importer.library import LibraryError, list_articles, read_article, search_articles
 from article_importer.models import FeedEntry, FeedSubscription
 from article_importer.state import StateStore
 
@@ -37,6 +37,10 @@ class LibraryTests(unittest.TestCase):
             self.assertEqual(entry.url, listed[0].url)
             self.assertEqual(str(article_path), searched[0]["path"])
             self.assertIn("Consensus is contextual", read["markdown"])
+
+    def test_list_rejects_invalid_since_timestamp(self) -> None:
+        with self.assertRaisesRegex(LibraryError, "ISO-8601"):
+            list_articles(Path("missing.sqlite3"), since="last Tuesday")
 
 
 if __name__ == "__main__":

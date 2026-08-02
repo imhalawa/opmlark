@@ -28,6 +28,9 @@ from article_importer.workspace import (
     list_feeds,
     list_failures,
     disable_catalog,
+    enable_catalog,
+    remove_category,
+    rename_category,
     remove_feed,
     retry_failure,
     to_json,
@@ -126,6 +129,11 @@ def _parser() -> argparse.ArgumentParser:
     catalog_disable.add_argument("--id", required=True)
     _json_flag(catalog_disable)
     catalog_disable.set_defaults(handler=_catalog_disable)
+    catalog_enable = catalog_commands.add_parser("enable")
+    _config_flag(catalog_enable)
+    catalog_enable.add_argument("--id", required=True)
+    _json_flag(catalog_enable)
+    catalog_enable.set_defaults(handler=_catalog_enable)
 
     category = commands.add_parser("category", help="Manage OPML categories")
     category_commands = category.add_subparsers(dest="category_command", required=True)
@@ -140,6 +148,19 @@ def _parser() -> argparse.ArgumentParser:
     category_add.add_argument("--name", required=True)
     _json_flag(category_add)
     category_add.set_defaults(handler=_category_add)
+    category_remove = category_commands.add_parser("remove")
+    _config_flag(category_remove)
+    category_remove.add_argument("--catalog", required=True)
+    category_remove.add_argument("--name", required=True)
+    _json_flag(category_remove)
+    category_remove.set_defaults(handler=_category_remove)
+    category_rename = category_commands.add_parser("rename")
+    _config_flag(category_rename)
+    category_rename.add_argument("--catalog", required=True)
+    category_rename.add_argument("--name", required=True)
+    category_rename.add_argument("--to", required=True)
+    _json_flag(category_rename)
+    category_rename.set_defaults(handler=_category_rename)
 
     feed = commands.add_parser("feed", help="Manage feed subscriptions")
     feed_commands = feed.add_subparsers(dest="feed_command", required=True)
@@ -307,6 +328,12 @@ def _catalog_disable(args: argparse.Namespace) -> int:
     return 0
 
 
+def _catalog_enable(args: argparse.Namespace) -> int:
+    item = enable_catalog(find_config(args.config), args.id)
+    _emit(item, args.json, lambda value: f"Enabled catalog {value.id}")
+    return 0
+
+
 def _category_list(args: argparse.Namespace) -> int:
     items = list_categories(find_config(args.config), args.catalog)
     _emit(items, args.json, lambda values: _mapping_table(values, ("catalog", "category")))
@@ -316,6 +343,22 @@ def _category_list(args: argparse.Namespace) -> int:
 def _category_add(args: argparse.Namespace) -> int:
     item = add_category(find_config(args.config), args.catalog, args.name)
     _emit(item, args.json, lambda value: f"Added {value['category']} to {value['catalog']}")
+    return 0
+
+
+def _category_remove(args: argparse.Namespace) -> int:
+    item = remove_category(find_config(args.config), args.catalog, args.name)
+    _emit(item, args.json, lambda value: f"Removed empty category {value['category']}")
+    return 0
+
+
+def _category_rename(args: argparse.Namespace) -> int:
+    item = rename_category(find_config(args.config), args.catalog, args.name, args.to)
+    _emit(
+        item,
+        args.json,
+        lambda value: f"Renamed {value['category']} to {value['name']}",
+    )
     return 0
 
 
