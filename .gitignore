@@ -8,3 +8,7 @@ node_modules/
 dist/
 build/
 *.egg-info/
+docs/superpowers/
+.codex/
+.claude/
+.agents/
