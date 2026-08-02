@@ -12,12 +12,14 @@ import sys
 import xml.etree.ElementTree as ElementTree
 
 from article_importer.configuration import ConfigurationError, load_config
+from article_importer.library import LibraryError, list_articles, read_article, search_articles
 from article_importer.parsing import CatalogError, parse_catalogs
 from article_importer.service import ImportService
 from article_importer.scheduling import install_schedule, remove_schedule, schedule_info
 from article_importer.workspace import (
     WorkspaceError,
     add_category,
+    add_catalog,
     add_feed,
     find_config,
     initialize_workspace,
@@ -25,6 +27,7 @@ from article_importer.workspace import (
     list_categories,
     list_feeds,
     list_failures,
+    disable_catalog,
     remove_feed,
     retry_failure,
     to_json,
@@ -48,6 +51,7 @@ def main(arguments: list[str] | None = None) -> int:
         CatalogError,
         ConfigurationError,
         WorkspaceError,
+        LibraryError,
         ElementTree.ParseError,
         sqlite3.Error,
         OSError,
@@ -110,6 +114,18 @@ def _parser() -> argparse.ArgumentParser:
     _config_flag(catalog_list)
     _json_flag(catalog_list)
     catalog_list.set_defaults(handler=_catalog_list)
+    catalog_add = catalog_commands.add_parser("add")
+    _config_flag(catalog_add)
+    catalog_add.add_argument("--id", required=True)
+    catalog_add.add_argument("--path")
+    catalog_add.add_argument("--folder")
+    _json_flag(catalog_add)
+    catalog_add.set_defaults(handler=_catalog_add)
+    catalog_disable = catalog_commands.add_parser("disable")
+    _config_flag(catalog_disable)
+    catalog_disable.add_argument("--id", required=True)
+    _json_flag(catalog_disable)
+    catalog_disable.set_defaults(handler=_catalog_disable)
 
     category = commands.add_parser("category", help="Manage OPML categories")
     category_commands = category.add_subparsers(dest="category_command", required=True)
@@ -159,6 +175,27 @@ def _parser() -> argparse.ArgumentParser:
     failure_retry.add_argument("--url", required=True)
     _json_flag(failure_retry)
     failure_retry.set_defaults(handler=_failure_retry)
+
+    article = commands.add_parser("article", help="Query and read collected articles")
+    article_commands = article.add_subparsers(dest="article_command", required=True)
+    article_list = article_commands.add_parser("list")
+    _config_flag(article_list)
+    article_list.add_argument("--feed")
+    article_list.add_argument("--since", help="Minimum ISO-8601 publication timestamp")
+    article_list.add_argument("--limit", type=int, default=100)
+    _json_flag(article_list)
+    article_list.set_defaults(handler=_article_list)
+    article_search = article_commands.add_parser("search")
+    _config_flag(article_search)
+    article_search.add_argument("query")
+    article_search.add_argument("--limit", type=int, default=20)
+    _json_flag(article_search)
+    article_search.set_defaults(handler=_article_search)
+    article_read = article_commands.add_parser("read")
+    _config_flag(article_read)
+    article_read.add_argument("--url", required=True)
+    _json_flag(article_read)
+    article_read.set_defaults(handler=_article_read)
     return parser
 
 
@@ -253,6 +290,23 @@ def _catalog_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _catalog_add(args: argparse.Namespace) -> int:
+    item = add_catalog(
+        find_config(args.config),
+        catalog_id=args.id,
+        path_value=args.path,
+        folder=args.folder,
+    )
+    _emit(item, args.json, lambda value: f"Added catalog {value.id}: {value.path}")
+    return 0
+
+
+def _catalog_disable(args: argparse.Namespace) -> int:
+    item = disable_catalog(find_config(args.config), args.id)
+    _emit(item, args.json, lambda value: f"Disabled catalog {value.id}")
+    return 0
+
+
 def _category_list(args: argparse.Namespace) -> int:
     items = list_categories(find_config(args.config), args.catalog)
     _emit(items, args.json, lambda values: _mapping_table(values, ("catalog", "category")))
@@ -275,7 +329,7 @@ def _feed_add(args: argparse.Namespace) -> int:
     item = add_feed(
         find_config(args.config),
         catalog_id=args.catalog,
-        source_id=args.id,
+        feed_id=args.id,
         name=args.name,
         url=args.url,
         category=args.category,
@@ -305,6 +359,30 @@ def _failure_list(args: argparse.Namespace) -> int:
 def _failure_retry(args: argparse.Namespace) -> int:
     item = retry_failure(find_config(args.config), args.url)
     _emit(item, args.json, lambda value: f"Queued retry for {value['url']}")
+    return 0
+
+
+def _state_path(args: argparse.Namespace) -> Path:
+    return find_config(args.config).parent / "data" / "articles.sqlite3"
+
+
+def _article_list(args: argparse.Namespace) -> int:
+    items = list_articles(
+        _state_path(args), feed=args.feed, since=args.since, limit=args.limit
+    )
+    _emit(items, args.json, lambda values: _table(values, ("published", "feed", "title", "url", "path")))
+    return 0
+
+
+def _article_search(args: argparse.Namespace) -> int:
+    items = search_articles(_state_path(args), args.query, limit=args.limit)
+    _emit(items, args.json, lambda values: _mapping_table(values, ("feed", "title", "url", "path", "excerpt")))
+    return 0
+
+
+def _article_read(args: argparse.Namespace) -> int:
+    item = read_article(_state_path(args), args.url)
+    print(to_json(item) if args.json else item["markdown"], end="\n" if args.json else "")
     return 0
 
 

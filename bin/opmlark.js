@@ -33,7 +33,11 @@ for (const [command, prefix] of candidates) {
     encoding: "utf8",
     windowsHide: true,
   });
-  if (check.status === 0) {
+  const versionText = `${check.stdout ?? ""} ${check.stderr ?? ""}`;
+  const match = versionText.match(/Python\s+(\d+)\.(\d+)/i);
+  const supported =
+    match && (Number(match[1]) > 3 || (Number(match[1]) === 3 && Number(match[2]) >= 11));
+  if (check.status === 0 && supported) {
     selected = [command, prefix];
     break;
   }

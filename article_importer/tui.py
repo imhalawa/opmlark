@@ -27,10 +27,19 @@ def run_tui() -> int:
             "  [3] List feeds\n"
             "  [4] Add feed\n"
             "  [5] Remove feed\n"
-            "  [6] List categories\n"
-            "  [7] Add category\n"
-            "  [8] List failures\n"
-            "  [9] Retry failed article\n"
+            "  [6] List catalogs\n"
+            "  [7] Add catalog\n"
+            "  [8] Disable catalog\n"
+            "  [9] List categories\n"
+            "  [10] Add category\n"
+            "  [11] List articles\n"
+            "  [12] Search articles\n"
+            "  [13] Read article\n"
+            "  [14] List failures\n"
+            "  [15] Retry failed article\n"
+            "  [16] Show schedule\n"
+            "  [17] Install schedule\n"
+            "  [18] Remove schedule\n"
             "  [q] Quit"
         )
         choice = _prompt("Choose", "1").lower()
@@ -49,8 +58,30 @@ def run_tui() -> int:
             if source_id and _prompt(f"Remove {source_id}?", "n").lower() == "y":
                 main(["feed", "remove", "--id", source_id, "--config", str(config)])
         elif choice == "6":
-            main(["category", "list", "--config", str(config)])
+            main(["catalog", "list", "--config", str(config)])
         elif choice == "7":
+            catalog_id = _prompt("Catalog id")
+            folder = _prompt("Default output folder", catalog_id)
+            if catalog_id:
+                main(
+                    [
+                        "catalog",
+                        "add",
+                        "--id",
+                        catalog_id,
+                        "--folder",
+                        folder,
+                        "--config",
+                        str(config),
+                    ]
+                )
+        elif choice == "8":
+            catalog_id = _prompt("Catalog id")
+            if catalog_id and _prompt(f"Disable {catalog_id}?", "n").lower() == "y":
+                main(["catalog", "disable", "--id", catalog_id, "--config", str(config)])
+        elif choice == "9":
+            main(["category", "list", "--config", str(config)])
+        elif choice == "10":
             catalog = _prompt("Catalog id", "reading")
             category = _prompt("Category path, for example Engineering/System Design")
             if category:
@@ -66,12 +97,30 @@ def run_tui() -> int:
                         str(config),
                     ]
                 )
-        elif choice == "8":
+        elif choice == "11":
+            main(["article", "list", "--limit", "50", "--config", str(config)])
+        elif choice == "12":
+            query = _prompt("Search text")
+            if query:
+                main(["article", "search", query, "--config", str(config)])
+        elif choice == "13":
+            url = _prompt("Article URL")
+            if url:
+                main(["article", "read", "--url", url, "--config", str(config)])
+        elif choice == "14":
             main(["failure", "list", "--config", str(config)])
-        elif choice == "9":
+        elif choice == "15":
             url = _prompt("Failed article URL")
             if url:
                 main(["failure", "retry", "--url", url, "--config", str(config)])
+        elif choice == "16":
+            main(["schedule", "show", "--config", str(config)])
+        elif choice == "17":
+            time = _prompt("Daily time (HH:MM)", "07:00")
+            main(["schedule", "install", "--time", time, "--config", str(config)])
+        elif choice == "18":
+            if _prompt("Remove this workspace schedule?", "n").lower() == "y":
+                main(["schedule", "remove", "--config", str(config)])
         else:
             print("Unknown choice")
 

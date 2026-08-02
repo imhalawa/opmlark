@@ -47,8 +47,11 @@ class StateStoreTests(unittest.TestCase):
                 self.assertEqual((ENTRY,), second.candidates)
                 state.mark_failed(SUBSCRIPTION.feed_url, ENTRY.url, "second")
                 exhausted = state.candidates(SUBSCRIPTION, [ENTRY], max_attempts=2)
+                self.assertTrue(state.reset_failure(ENTRY.url))
+                reset = state.candidates(SUBSCRIPTION, [ENTRY], max_attempts=2)
 
             self.assertEqual((), exhausted.candidates)
+            self.assertEqual((ENTRY,), reset.candidates)
 
     def setUp(self) -> None:
         self.temporary_directory = TemporaryDirectory()

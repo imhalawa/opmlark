@@ -235,6 +235,38 @@ class StateStore:
             connection.rollback()
             raise
 
+    def failures(self) -> tuple[dict[str, object], ...]:
+        """Return failed articles with their retry state."""
+        connection = self._mutable_connection()
+        return tuple(
+            {
+                "url": row[0],
+                "feed": row[1],
+                "attempts": row[2],
+                "error": row[3],
+                "updated": row[4],
+            }
+            for row in connection.execute(
+                """
+                SELECT article_url, feed_url, attempts, error_message, updated_at
+                FROM entries WHERE status = 'failed'
+                ORDER BY updated_at DESC
+                """
+            )
+        )
+
+    def reset_failure(self, article_url: str) -> bool:
+        """Reset an exhausted failure so the next visible observation retries it."""
+        connection = self._mutable_connection()
+        cursor = connection.execute(
+            """
+            UPDATE entries SET attempts = 0, error_message = NULL
+            WHERE article_url = ? AND status = 'failed'
+            """,
+            (article_url,),
+        )
+        return cursor.rowcount > 0
+
     def _dry_run_candidates(
         self,
         subscription: FeedSubscription,

@@ -24,6 +24,9 @@ The durable set of articles available for reading, annotation, and querying.
 The deterministic, token-free process that discovers and collects new articles.
 _Avoid_: Enrichment, summarization
 
+**Failure**:
+An article that ingestion could not collect successfully. It remains visible for inspection after automatic retries are exhausted.
+
 **Enrichment**:
 An optional AI operation performed on selected articles at the reader's request. Its output is ephemeral and is not part of the managed collection.
 _Avoid_: Ingestion

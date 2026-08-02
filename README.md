@@ -131,6 +131,9 @@ opmlark catalog list --json
 opmlark category list --json
 opmlark feed list --json
 opmlark run --dry-run --json
+opmlark article list --since 2026-08-01 --json
+opmlark article search "distributed systems" --json
+opmlark article read --url "https://example.com/article" --json
 ```
 
 An AI workflow should first query this structured metadata, then read only the selected Markdown files. OPMLark does not generate or store summaries.
@@ -151,10 +154,11 @@ opmlark init                    Create a workspace
 opmlark run [--dry-run]         Ingest or preview new articles
 opmlark status                  Show collection state
 opmlark doctor                  Check prerequisites
-opmlark catalog list            List OPML catalogs
+opmlark catalog list|add|disable Manage OPML catalogs
 opmlark category list|add       Manage nested categories
 opmlark feed list|add|remove    Manage subscriptions
 opmlark failure list|retry      Inspect or explicitly retry failed articles
+opmlark article list|search|read Query the collection without AI tokens
 opmlark schedule show|install|remove
 ```
 

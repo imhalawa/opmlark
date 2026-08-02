@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 import json
 import os
 from pathlib import Path
+import re
 import sqlite3
 from tempfile import NamedTemporaryFile
 import tomllib
@@ -12,6 +13,7 @@ import xml.etree.ElementTree as ElementTree
 from article_importer.configuration import FeedCatalog
 from article_importer.notes import normalize_storage_folder
 from article_importer.parsing import CatalogError, parse_catalogs
+from article_importer.state import StateStore
 
 
 class WorkspaceError(ValueError):
@@ -103,6 +105,87 @@ def list_catalogs(config_path: Path) -> tuple[CatalogInfo, ...]:
     )
 
 
+def add_catalog(
+    config_path: Path,
+    *,
+    catalog_id: str,
+    path_value: str | None = None,
+    folder: str | None = None,
+) -> CatalogInfo:
+    if not catalog_id.strip() or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", catalog_id):
+        raise WorkspaceError("Catalog id must use lowercase letters, numbers, and hyphens")
+    if any(catalog.id == catalog_id for catalog in _catalogs(config_path, include_disabled=True)):
+        raise WorkspaceError(f"Catalog id already exists: {catalog_id}")
+    relative = Path((path_value or f"feeds/{catalog_id}.opml").replace("\\", "/"))
+    if (
+        relative.is_absolute()
+        or relative.drive
+        or ".." in relative.parts
+        or relative.suffix.lower() != ".opml"
+    ):
+        raise WorkspaceError("Catalog path must be a workspace-relative .opml file")
+    if folder is not None:
+        normalize_storage_folder(folder)
+    catalog_path = (config_path.parent / relative).resolve()
+    if catalog_path.exists():
+        raise WorkspaceError(f"Catalog file already exists: {catalog_path}")
+    catalog_path.parent.mkdir(parents=True, exist_ok=True)
+    catalog_path.write_text(
+        """<?xml version='1.0' encoding='utf-8'?>
+<opml version="2.0">
+  <head><title>OPMLark Catalog</title></head>
+  <body />
+</opml>
+""",
+        encoding="utf-8",
+    )
+    block = (
+        "\n[[feed_catalogs]]\n"
+        f"id = {json.dumps(catalog_id)}\n"
+        f"path = {json.dumps(relative.as_posix())}\n"
+    )
+    if folder:
+        block += f"folder = {json.dumps(folder)}\n"
+    try:
+        _replace_text(config_path, config_path.read_text(encoding="utf-8").rstrip() + "\n" + block)
+    except BaseException:
+        catalog_path.unlink(missing_ok=True)
+        raise
+    return CatalogInfo(catalog_id, str(catalog_path), folder, True)
+
+
+def disable_catalog(config_path: Path, catalog_id: str) -> CatalogInfo:
+    matches = [
+        catalog
+        for catalog in _catalogs(config_path, include_disabled=True)
+        if catalog.id == catalog_id
+    ]
+    if not matches:
+        raise WorkspaceError(f"Unknown catalog: {catalog_id}")
+    contents = config_path.read_text(encoding="utf-8")
+    blocks = list(
+        re.finditer(
+            r"(?ms)^\[\[feed_catalogs\]\]\s*\n.*?(?=^\[\[feed_catalogs\]\]|\Z)",
+            contents,
+        )
+    )
+    for match in blocks:
+        block = match.group(0)
+        try:
+            block_id = tomllib.loads(block)["feed_catalogs"][0]["id"]
+        except (KeyError, IndexError, tomllib.TOMLDecodeError):
+            continue
+        if block_id == catalog_id:
+            if re.search(r"(?m)^enabled\s*=", block):
+                updated = re.sub(r"(?m)^enabled\s*=.*$", "enabled = false", block)
+            else:
+                updated = block.rstrip() + "\nenabled = false\n\n"
+            _replace_text(config_path, contents[: match.start()] + updated + contents[match.end() :])
+            catalog = matches[0]
+            return CatalogInfo(catalog.id, str(catalog.path), catalog.folder, False)
+    raise WorkspaceError(f"Unable to locate catalog configuration: {catalog_id}")
+
+
 def list_feeds(config_path: Path) -> tuple[FeedInfo, ...]:
     catalogs = _catalogs(config_path)
     catalog_by_path = {catalog.path.resolve(): catalog.id for catalog in catalogs}
@@ -146,24 +229,24 @@ def add_feed(
     config_path: Path,
     *,
     catalog_id: str,
-    source_id: str,
+    feed_id: str,
     name: str,
     url: str,
     category: str,
     home_url: str | None = None,
     folder: str | None = None,
 ) -> FeedInfo:
-    if not source_id.strip() or not name.strip() or not url.strip():
+    if not feed_id.strip() or not name.strip() or not url.strip():
         raise WorkspaceError("Feed id, name, and URL must be non-empty")
-    if any(feed.id == source_id for feed in list_feeds(config_path)):
-        raise WorkspaceError(f"Feed id already exists: {source_id}")
+    if any(feed.id == feed_id for feed in list_feeds(config_path)):
+        raise WorkspaceError(f"Feed id already exists: {feed_id}")
     if folder is not None:
         normalize_storage_folder(folder)
     canonical_category = " / ".join(part.strip() for part in category.split("/") if part.strip())
     catalog = _one_catalog(config_path, catalog_id)
     tree = ElementTree.parse(catalog.path)
     parent = _category_node(_body(tree), category, create=True)
-    attributes = {"id": source_id, "text": name, "title": name, "xmlUrl": url}
+    attributes = {"id": feed_id, "text": name, "title": name, "xmlUrl": url}
     if home_url:
         attributes["htmlUrl"] = home_url
     if folder:
@@ -171,20 +254,20 @@ def add_feed(
     ElementTree.SubElement(parent, "outline", attributes)
     _write_opml(tree, catalog.path)
     return FeedInfo(
-        source_id, name, url, canonical_category, catalog_id, folder or catalog.folder
+        feed_id, name, url, canonical_category, catalog_id, folder or catalog.folder
     )
 
 
-def remove_feed(config_path: Path, source_id: str) -> FeedInfo:
-    matches = [feed for feed in list_feeds(config_path) if feed.id == source_id]
+def remove_feed(config_path: Path, feed_id: str) -> FeedInfo:
+    matches = [feed for feed in list_feeds(config_path) if feed.id == feed_id]
     if not matches:
-        raise WorkspaceError(f"Unknown feed id: {source_id}")
+        raise WorkspaceError(f"Unknown feed id: {feed_id}")
     feed = matches[0]
     catalog = _one_catalog(config_path, feed.catalog)
     tree = ElementTree.parse(catalog.path)
     body = _body(tree)
-    if not _remove_outline(body, source_id):
-        raise WorkspaceError(f"Unable to remove feed id: {source_id}")
+    if not _remove_outline(body, feed_id):
+        raise WorkspaceError(f"Unable to remove feed id: {feed_id}")
     _write_opml(tree, catalog.path)
     return feed
 
@@ -214,53 +297,17 @@ def list_failures(config_path: Path) -> tuple[dict[str, object], ...]:
     state_path = config_path.parent / "data" / "articles.sqlite3"
     if not state_path.is_file():
         return ()
-    connection = sqlite3.connect(f"{state_path.resolve().as_uri()}?mode=ro", uri=True)
-    try:
-        columns = {row[1] for row in connection.execute("PRAGMA table_info(entries)")}
-        attempts = "attempts" if "attempts" in columns else "0"
-        return tuple(
-            {
-                "url": row[0],
-                "feed": row[1],
-                "attempts": row[2],
-                "error": row[3],
-                "updated": row[4],
-            }
-            for row in connection.execute(
-                f"""
-                SELECT article_url, feed_url, {attempts}, error_message, updated_at
-                FROM entries WHERE status = 'failed'
-                ORDER BY updated_at DESC
-                """
-            )
-        )
-    finally:
-        connection.close()
+    with StateStore(state_path) as state:
+        return state.failures()
 
 
 def retry_failure(config_path: Path, article_url: str) -> dict[str, str]:
     state_path = config_path.parent / "data" / "articles.sqlite3"
     if not state_path.is_file():
         raise WorkspaceError("Workspace has no ingestion state yet")
-    connection = sqlite3.connect(state_path)
-    try:
-        columns = {row[1] for row in connection.execute("PRAGMA table_info(entries)")}
-        if "attempts" not in columns:
-            connection.execute(
-                "ALTER TABLE entries ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0"
-            )
-        cursor = connection.execute(
-            """
-            UPDATE entries SET attempts = 0, error_message = NULL
-            WHERE article_url = ? AND status = 'failed'
-            """,
-            (article_url,),
-        )
-        if cursor.rowcount == 0:
+    with StateStore(state_path) as state:
+        if not state.reset_failure(article_url):
             raise WorkspaceError(f"No failed article found: {article_url}")
-        connection.commit()
-    finally:
-        connection.close()
     return {"url": article_url, "status": "ready_to_retry"}
 
 
@@ -358,12 +405,12 @@ def _collect_categories(
         _collect_categories(child, category, catalog_id, results)
 
 
-def _remove_outline(parent: ElementTree.Element, source_id: str) -> bool:
+def _remove_outline(parent: ElementTree.Element, feed_id: str) -> bool:
     for child in list(parent):
-        if child.get("xmlUrl") and (child.get("id") or "").strip() == source_id:
+        if child.get("xmlUrl") and (child.get("id") or "").strip() == feed_id:
             parent.remove(child)
             return True
-        if _remove_outline(child, source_id):
+        if _remove_outline(child, feed_id):
             return True
     return False
 
@@ -374,6 +421,20 @@ def _write_opml(tree: ElementTree.ElementTree, path: Path) -> None:
     try:
         with NamedTemporaryFile("wb", dir=path.parent, delete=False) as temporary:
             tree.write(temporary, encoding="utf-8", xml_declaration=True)
+            temporary_path = Path(temporary.name)
+        temporary_path.replace(path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
+def _replace_text(path: Path, contents: str) -> None:
+    temporary_path: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            "w", encoding="utf-8", newline="", dir=path.parent, delete=False
+        ) as temporary:
+            temporary.write(contents)
             temporary_path = Path(temporary.name)
         temporary_path.replace(path)
     finally:

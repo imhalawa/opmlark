@@ -13,8 +13,11 @@ from article_importer.scheduling import schedule_info
 from article_importer.workspace import (
     WorkspaceError,
     add_category,
+    add_catalog,
     add_feed,
     initialize_workspace,
+    disable_catalog,
+    list_catalogs,
     list_categories,
     list_feeds,
     remove_feed,
@@ -22,6 +25,20 @@ from article_importer.workspace import (
 
 
 class WorkspaceTests(unittest.TestCase):
+    def test_catalog_add_and_disable_preserve_opml_file(self) -> None:
+        with TemporaryDirectory() as directory:
+            config = Path(initialize_workspace(Path(directory))["config"])
+
+            added = add_catalog(
+                config, catalog_id="engineering", folder="Engineering"
+            )
+            disabled = disable_catalog(config, "engineering")
+
+            self.assertTrue(Path(added.path).is_file())
+            self.assertFalse(disabled.enabled)
+            catalogs = {item.id: item for item in list_catalogs(config)}
+            self.assertFalse(catalogs["engineering"].enabled)
+
     def test_init_creates_generic_markdown_workspace(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory) / "library"
@@ -41,7 +58,7 @@ class WorkspaceTests(unittest.TestCase):
             added = add_feed(
                 config,
                 catalog_id="reading",
-                source_id="example-engineering",
+                feed_id="example-engineering",
                 name="Example Engineering",
                 url="https://example.test/feed.xml",
                 category="Engineering/System Design",
@@ -60,7 +77,7 @@ class WorkspaceTests(unittest.TestCase):
             config = Path(initialize_workspace(Path(directory))["config"])
             details = dict(
                 catalog_id="reading",
-                source_id="duplicate",
+                feed_id="duplicate",
                 name="Example",
                 url="https://example.test/feed.xml",
                 category="Reading",
