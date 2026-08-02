@@ -9,6 +9,6 @@ Thank you for helping make token-free article collection useful to more readers.
 3. Run `python -m unittest discover -v`.
 4. Run `npm run smoke` and `npm pack --dry-run`.
 
-Keep OPML as the subscription source of truth, preserve imported Markdown bodies, and add tests for behavior changes. Product language belongs in `CONTEXT.md`; architectural trade-offs that are hard to reverse belong in a short ADR under `docs/adr/`.
+Keep OPML as the subscription source of truth, preserve imported Markdown bodies, and add tests for behavior changes. Product language belongs in `CONTEXT.md`; architectural trade-offs that are hard to reverse belong in a short ADR under `docs/adr/`. Canonical system documentation belongs in `docs/architecture.md`. Do not commit AI-generated plans, transcripts, review artifacts, or tool-specific workspace directories.
 
 Use Conventional Commits for commit messages. Open focused pull requests that explain the user-visible impact and include the checks you ran.
