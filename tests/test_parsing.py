@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from article_importer.configuration import ConfigurationError, FeedCatalog, load_config
+from article_importer.configuration import ConfigurationError, FeedCatalog, Schedule, load_config
 from article_importer.models import FeedSubscription
 from article_importer.parsing import CatalogError, parse_catalogs, parse_feed, parse_opml
 from tests.fixtures import (
@@ -129,6 +129,56 @@ class ParsingTests(unittest.TestCase):
             loaded.feed_catalogs,
         )
         self.assertEqual(frozenset({"blocked"}), loaded.disabled_sources)
+
+    def test_config_reads_all_portable_schedule_types(self) -> None:
+        articles = self.temp / "articles"
+        articles.mkdir()
+        config = self.temp / "config.toml"
+        config.write_text(
+            '[importer]\noutput_path = "articles"\nlookback_days = 90\n'
+            '[[schedules]]\nid = "morning"\nfrequency = "daily"\nat = "07:00"\n'
+            '[[schedules]]\nid = "weekend"\nfrequency = "weekly"\ndays = ["SAT", "sun"]\nat = "09:30"\n'
+            '[[schedules]]\nid = "monthly-review"\nfrequency = "monthly"\nday = 31\nat = "18:00"\n'
+            '[[schedules]]\nid = "special-import"\nfrequency = "once"\ndate = "2026-09-15"\nat = "12:00"\nenabled = false\n',
+            encoding="utf-8",
+        )
+
+        loaded = load_config(config)
+
+        self.assertEqual(
+            (
+                Schedule("morning", "daily", "07:00"),
+                Schedule("weekend", "weekly", "09:30", days=("sat", "sun")),
+                Schedule("monthly-review", "monthly", "18:00", day=31),
+                Schedule("special-import", "once", "12:00", False, date="2026-09-15"),
+            ),
+            loaded.schedules,
+        )
+
+    def test_config_rejects_invalid_schedule_shapes(self) -> None:
+        articles = self.temp / "articles"
+        articles.mkdir()
+        prefix = '[importer]\noutput_path = "articles"\nlookback_days = 90\n'
+        invalid_blocks = {
+            "duplicate schedule id": (
+                '[[schedules]]\nid = "same"\nfrequency = "daily"\nat = "07:00"\n'
+                '[[schedules]]\nid = "same"\nfrequency = "daily"\nat = "08:00"\n'
+            ),
+            "schedules.id": '[[schedules]]\nid = "Bad ID"\nfrequency = "daily"\nat = "07:00"\n',
+            "schedules.at": '[[schedules]]\nid = "bad-time"\nfrequency = "daily"\nat = "7:00"\n',
+            "schedules.frequency": '[[schedules]]\nid = "raw"\nfrequency = "cron"\nat = "07:00"\n',
+            "schedules.days": '[[schedules]]\nid = "empty"\nfrequency = "weekly"\ndays = []\nat = "07:00"\n',
+            "duplicate weekdays": '[[schedules]]\nid = "dupe-days"\nfrequency = "weekly"\ndays = ["mon", "MON"]\nat = "07:00"\n',
+            "schedules.day": '[[schedules]]\nid = "bad-day"\nfrequency = "monthly"\nday = 32\nat = "07:00"\n',
+            "schedules.date": '[[schedules]]\nid = "bad-date"\nfrequency = "once"\ndate = "2026-02-30"\nat = "07:00"\n',
+            "unexpected fields": '[[schedules]]\nid = "extra"\nfrequency = "daily"\nat = "07:00"\nday = 1\n',
+        }
+        for message, block in invalid_blocks.items():
+            with self.subTest(message=message):
+                config = self.temp / "config.toml"
+                config.write_text(prefix + block, encoding="utf-8")
+                with self.assertRaisesRegex(ConfigurationError, message):
+                    load_config(config)
 
     def test_rss_and_atom_links_are_read(self) -> None:
         feed = FeedSubscription("Algorithms", "Example", "https://example.test/feed")

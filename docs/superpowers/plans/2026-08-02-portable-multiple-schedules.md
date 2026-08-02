@@ -29,7 +29,7 @@
 - Modify `article_importer/cli.py`: schedule command grammar, handlers, interactive fallback, and run locking.
 - Modify `article_importer/tui.py`: schedule list/add/edit/enable/disable/remove/apply/status menu.
 - Modify `README.md`, `CONTEXT.md`, and `CHANGELOG.md`: public behavior, examples, and migration notes.
-- Modify `tests/test_configuration.py`, `tests/test_scheduling.py`, `tests/test_workspace.py`, and create `tests/test_run_lock.py`: model, translation, reconciliation, CLI, and locking coverage.
+- Modify `tests/test_parsing.py`, `tests/test_scheduling.py`, `tests/test_workspace.py`, and create `tests/test_run_lock.py`: model, translation, reconciliation, CLI, and locking coverage.
 
 ---
 
@@ -38,7 +38,7 @@
 **Files:**
 - Modify: `article_importer/configuration.py`
 - Create: `article_importer/schedule_config.py`
-- Modify: `tests/test_configuration.py`
+- Modify: `tests/test_parsing.py`
 - Create: `tests/test_schedule_config.py`
 
 **Interfaces:**
@@ -59,7 +59,7 @@ self.assertEqual(
 
 - [ ] **Step 2: Run parser tests and verify red**
 
-Run: `python -m unittest tests.test_configuration -v`
+Run: `python -m unittest tests.test_parsing -v`
 
 Expected: FAIL because `Schedule` and `ImporterConfig.schedules` do not exist.
 
@@ -84,7 +84,7 @@ Implement `_read_schedules(config: dict[str, object]) -> tuple[Schedule, ...]`, 
 
 - [ ] **Step 4: Run parser tests and verify green**
 
-Run: `python -m unittest tests.test_configuration -v`
+Run: `python -m unittest tests.test_parsing -v`
 
 Expected: PASS.
 
@@ -108,7 +108,7 @@ Validate the complete proposed TOML through `load_config` before replacing the o
 
 - [ ] **Step 8: Run focused tests and commit**
 
-Run: `python -m unittest tests.test_configuration tests.test_schedule_config -v`
+Run: `python -m unittest tests.test_parsing tests.test_schedule_config -v`
 
 Expected: PASS.
 
@@ -197,7 +197,7 @@ Commit: `feat: reconcile schedules across operating systems`
 - Modify: `article_importer/cli.py`
 - Modify: `article_importer/tui.py`
 - Modify: `tests/test_workspace.py`
-- Create: `tests/test_tui.py`
+- Modify: `tests/test_tui.py`
 
 **Interfaces:**
 - Consumes: configuration mutation and native reconciliation functions from Tasks 1-2.
