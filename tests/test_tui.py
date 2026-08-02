@@ -51,6 +51,34 @@ class TuiTests(unittest.TestCase):
             main.call_args_list,
         )
 
+    def test_schedule_submenu_routes_portable_management(self) -> None:
+        config = Path("C:/workspace/config.toml")
+        answers = [
+            "16", "1", "2", "morning", "daily", "07:00",
+            "4", "morning", "5", "morning", "7", "8", "b", "q",
+        ]
+        with (
+            patch("article_importer.tui.find_config", return_value=config),
+            patch("article_importer.tui._print_status"),
+            patch("article_importer.tui.input", side_effect=answers),
+            patch("article_importer.tui.main", return_value=0) as main,
+            patch("builtins.print"),
+        ):
+            result = run_tui()
+
+        self.assertEqual(0, result)
+        self.assertEqual(
+            [
+                call(["schedule", "list", "--config", str(config)]),
+                call(["schedule", "add", "morning", "--daily", "--at", "07:00", "--config", str(config)]),
+                call(["schedule", "enable", "morning", "--config", str(config)]),
+                call(["schedule", "disable", "morning", "--config", str(config)]),
+                call(["schedule", "apply", "--config", str(config)]),
+                call(["schedule", "status", "--config", str(config)]),
+            ],
+            main.call_args_list,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
