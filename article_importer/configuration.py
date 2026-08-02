@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
+import re
 import shutil
 import tomllib
 
@@ -21,6 +23,19 @@ class FeedCatalog:
 
 
 @dataclass(frozen=True)
+class Schedule:
+    """A portable local-time ingestion schedule."""
+
+    id: str
+    frequency: str
+    at: str
+    enabled: bool = True
+    days: tuple[str, ...] = ()
+    day: int | None = None
+    date: str | None = None
+
+
+@dataclass(frozen=True)
 class ImporterConfig:
     vault_path: Path | None
     articles_path: Path
@@ -29,6 +44,7 @@ class ImporterConfig:
     feed_catalogs: tuple[FeedCatalog, ...] = ()
     disabled_sources: frozenset[str] = frozenset()
     max_attempts: int = 3
+    schedules: tuple[Schedule, ...] = ()
 
 
 def load_config(path: Path) -> ImporterConfig:
@@ -79,6 +95,7 @@ def load_config(path: Path) -> ImporterConfig:
 
     catalogs = _read_catalogs(raw_config, config_path.parent)
     disabled_sources = _read_disabled_sources(raw_config)
+    schedules = _read_schedules(raw_config)
     return ImporterConfig(
         vault_path,
         articles_path,
@@ -87,6 +104,7 @@ def load_config(path: Path) -> ImporterConfig:
         catalogs,
         disabled_sources,
         max_attempts,
+        schedules,
     )
 
 
@@ -166,3 +184,96 @@ def _read_string_list(value: object, name: str) -> frozenset[str]:
     ):
         raise ConfigurationError(f"{name} must be an array of non-empty strings")
     return frozenset(value)
+
+
+def _read_schedules(config: dict[str, object]) -> tuple[Schedule, ...]:
+    values = config.get("schedules", [])
+    if not isinstance(values, list):
+        raise ConfigurationError("schedules must be an array of TOML tables")
+
+    schedules: list[Schedule] = []
+    seen_ids: set[str] = set()
+    common_keys = {"id", "frequency", "at", "enabled"}
+    recurrence_keys = {
+        "daily": set(),
+        "weekly": {"days"},
+        "monthly": {"day"},
+        "once": {"date"},
+    }
+    for value in values:
+        if not isinstance(value, dict):
+            raise ConfigurationError("each schedules entry must be a TOML table")
+        schedule_id = value.get("id")
+        frequency = value.get("frequency")
+        at = value.get("at")
+        enabled = value.get("enabled", True)
+        if not isinstance(schedule_id, str) or not re.fullmatch(
+            r"[a-z0-9][a-z0-9-]*", schedule_id
+        ):
+            raise ConfigurationError(
+                "schedules.id must use lowercase letters, numbers, and hyphens"
+            )
+        if schedule_id in seen_ids:
+            raise ConfigurationError(f"duplicate schedule id: {schedule_id}")
+        if frequency not in recurrence_keys:
+            raise ConfigurationError(
+                "schedules.frequency must be daily, weekly, monthly, or once"
+            )
+        if not isinstance(at, str) or not re.fullmatch(
+            r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", at
+        ):
+            raise ConfigurationError("schedules.at must use a valid 24-hour HH:MM value")
+        if not isinstance(enabled, bool):
+            raise ConfigurationError("schedules.enabled must be a boolean")
+
+        expected_keys = common_keys | recurrence_keys[frequency]
+        unexpected = set(value) - expected_keys
+        if unexpected:
+            raise ConfigurationError(
+                "schedules has unexpected fields for "
+                f"{frequency}: {', '.join(sorted(unexpected))}"
+            )
+        missing = recurrence_keys[frequency] - set(value)
+        if missing:
+            raise ConfigurationError(
+                f"schedules.{next(iter(missing))} is required for {frequency}"
+            )
+
+        days: tuple[str, ...] = ()
+        day_value: int | None = None
+        date_value: str | None = None
+        if frequency == "weekly":
+            raw_days = value["days"]
+            if not isinstance(raw_days, list) or not raw_days or any(
+                not isinstance(item, str)
+                or item.casefold() not in {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+                for item in raw_days
+            ):
+                raise ConfigurationError(
+                    "schedules.days must be a non-empty array of weekday names"
+                )
+            days = tuple(item.casefold() for item in raw_days)
+            if len(set(days)) != len(days):
+                raise ConfigurationError("schedules.days must not contain duplicate weekdays")
+        elif frequency == "monthly":
+            raw_day = value["day"]
+            if isinstance(raw_day, bool) or not isinstance(raw_day, int) or not 1 <= raw_day <= 31:
+                raise ConfigurationError("schedules.day must be an integer from 1 through 31")
+            day_value = raw_day
+        elif frequency == "once":
+            raw_date = value["date"]
+            if not isinstance(raw_date, str):
+                raise ConfigurationError("schedules.date must use YYYY-MM-DD")
+            try:
+                parsed_date = date.fromisoformat(raw_date)
+            except ValueError as error:
+                raise ConfigurationError("schedules.date must use a valid YYYY-MM-DD date") from error
+            if parsed_date.isoformat() != raw_date:
+                raise ConfigurationError("schedules.date must use YYYY-MM-DD")
+            date_value = raw_date
+
+        seen_ids.add(schedule_id)
+        schedules.append(
+            Schedule(schedule_id, frequency, at, enabled, days, day_value, date_value)
+        )
+    return tuple(schedules)

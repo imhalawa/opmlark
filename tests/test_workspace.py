@@ -7,9 +7,10 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from article_importer.cli import main
-from article_importer.configuration import load_config
-from article_importer.scheduling import schedule_info
+from article_importer.cli import _parser, _schedule_from_args, main
+from article_importer.configuration import Schedule, load_config
+from article_importer.schedule_config import add_schedule_config
+from article_importer.scheduling import ScheduleChange, schedule_info
 from article_importer.workspace import (
     WorkspaceError,
     add_category,
@@ -213,6 +214,102 @@ class WorkspaceTests(unittest.TestCase):
 
             self.assertEqual("06:30", info.time)
             self.assertIn(str(config.resolve()), info.command)
+
+    def test_cli_adds_every_portable_schedule_and_lists_json(self) -> None:
+        with TemporaryDirectory() as directory:
+            config = Path(initialize_workspace(Path(directory))["config"])
+            commands = (
+                ["morning", "--daily", "--at", "07:00"],
+                ["weekend", "--weekly", "sat,sun", "--at", "09:30"],
+                ["monthly-review", "--monthly", "15", "--at", "18:00"],
+                ["special", "--once", "2026-09-15", "--at", "12:00"],
+            )
+            with patch(
+                "article_importer.cli.apply_schedules",
+                return_value=(ScheduleChange("item", "created"),),
+            ):
+                for values in commands:
+                    self.assertEqual(
+                        0,
+                        main(["schedule", "add", *values, "--config", str(config), "--json"]),
+                    )
+            output = StringIO()
+            with redirect_stdout(output):
+                result = main(["schedule", "list", "--config", str(config), "--json"])
+
+            self.assertEqual(0, result)
+            self.assertEqual(
+                {"morning", "weekend", "monthly-review", "special"},
+                {item.id for item in load_config(config).schedules},
+            )
+            self.assertIn('"frequency": "weekly"', output.getvalue())
+
+    def test_cli_edits_disables_enables_and_removes_by_id(self) -> None:
+        with TemporaryDirectory() as directory:
+            config = Path(initialize_workspace(Path(directory))["config"])
+            add_schedule_config(config, Schedule("morning", "daily", "07:00"))
+            with (
+                patch(
+                    "article_importer.cli.apply_schedules",
+                    return_value=(ScheduleChange("morning", "updated"),),
+                ),
+                patch(
+                    "article_importer.cli.remove_native_schedule",
+                    return_value=ScheduleChange("morning", "removed"),
+                ),
+            ):
+                self.assertEqual(0, main(["schedule", "edit", "morning", "--weekly", "mon,fri", "--at", "08:15", "--config", str(config)]))
+                self.assertEqual(0, main(["schedule", "disable", "morning", "--config", str(config)]))
+                self.assertFalse(load_config(config).schedules[0].enabled)
+                self.assertEqual(0, main(["schedule", "enable", "morning", "--config", str(config)]))
+                self.assertEqual(0, main(["schedule", "remove", "morning", "--config", str(config)]))
+
+            self.assertEqual((), load_config(config).schedules)
+
+    def test_cli_keeps_configuration_when_native_removal_fails(self) -> None:
+        with TemporaryDirectory() as directory:
+            config = Path(initialize_workspace(Path(directory))["config"])
+            add_schedule_config(config, Schedule("kept", "daily", "07:00"))
+            with patch(
+                "article_importer.cli.remove_native_schedule",
+                return_value=ScheduleChange("kept", "failed", False, "denied"),
+            ):
+                result = main(["schedule", "remove", "kept", "--config", str(config)])
+
+            self.assertEqual(1, result)
+            self.assertEqual("kept", load_config(config).schedules[0].id)
+
+    def test_interactive_schedule_add_prompts_for_recurrence_and_time(self) -> None:
+        args = _parser().parse_args(["schedule", "add", "weekend"])
+        with (
+            patch("article_importer.cli.sys.stdin.isatty", return_value=True),
+            patch("article_importer.cli.sys.stdout.isatty", return_value=True),
+            patch("builtins.input", side_effect=["weekly", "sat,sun", "09:30"]) as prompt,
+        ):
+            schedule = _schedule_from_args(args)
+
+        self.assertEqual(
+            Schedule("weekend", "weekly", "09:30", days=("sat", "sun")),
+            schedule,
+        )
+        self.assertEqual(3, prompt.call_count)
+
+    def test_schedule_status_has_stable_json_output(self) -> None:
+        with TemporaryDirectory() as directory:
+            config = Path(initialize_workspace(Path(directory))["config"])
+            output = StringIO()
+            with (
+                patch(
+                    "article_importer.cli.schedule_status",
+                    return_value=(ScheduleChange("morning", "missing"),),
+                ),
+                redirect_stdout(output),
+            ):
+                result = main(["schedule", "status", "--config", str(config), "--json"])
+
+            self.assertEqual(0, result)
+            self.assertIn('"id": "morning"', output.getvalue())
+            self.assertIn('"action": "missing"', output.getvalue())
 
 
 if __name__ == "__main__":

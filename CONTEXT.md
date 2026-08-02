@@ -24,6 +24,10 @@ The durable set of articles available for reading, annotation, and querying.
 The deterministic, token-free process that discovers and collects new articles.
 _Avoid_: Enrichment, summarization
 
+**Schedule**:
+A named, portable recurrence that triggers ingestion in the host operating system's native scheduler. Workspace configuration is authoritative; native tasks are replaceable projections.
+_Avoid_: Assuming every reader wants the original 07:00 default
+
 **Failure**:
 An article that ingestion could not collect successfully. It remains visible for inspection after automatic retries are exhausted.
 

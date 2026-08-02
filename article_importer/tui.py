@@ -37,12 +37,10 @@ def run_tui() -> int:
             "  [13] Read article\n"
             "  [14] List failures\n"
             "  [15] Retry failed article\n"
-            "  [16] Show schedule\n"
-            "  [17] Install schedule\n"
-            "  [18] Remove schedule\n"
-            "  [19] Enable catalog\n"
-            "  [20] Remove empty category\n"
-            "  [21] Rename category\n"
+            "  [16] Manage schedules\n"
+            "  [17] Enable catalog\n"
+            "  [18] Remove empty category\n"
+            "  [19] Rename category\n"
             "  [q] Quit"
         )
         choice = _prompt("Choose", "1").lower()
@@ -117,34 +115,17 @@ def run_tui() -> int:
             if url:
                 main(["failure", "retry", "--url", url, "--config", str(config)])
         elif choice == "16":
-            main(["schedule", "show", "--config", str(config)])
+            _schedule_menu(config)
         elif choice == "17":
-            time = _prompt("Daily time (HH:MM)", "07:00")
-            main(["schedule", "install", "--time", time, "--config", str(config)])
-        elif choice == "18":
-            if _prompt("Remove this workspace schedule?", "n").lower() == "y":
-                main(["schedule", "remove", "--config", str(config)])
-        elif choice == "19":
             catalog_id = _prompt("Catalog id")
             if catalog_id:
                 main(["catalog", "enable", "--id", catalog_id, "--config", str(config)])
-        elif choice == "20":
+        elif choice == "18":
             catalog_id = _prompt("Catalog id", "reading")
             category = _prompt("Empty category path")
             if category:
-                main(
-                    [
-                        "category",
-                        "remove",
-                        "--catalog",
-                        catalog_id,
-                        "--name",
-                        category,
-                        "--config",
-                        str(config),
-                    ]
-                )
-        elif choice == "21":
+                main(["category", "remove", "--catalog", catalog_id, "--name", category, "--config", str(config)])
+        elif choice == "19":
             catalog_id = _prompt("Catalog id", "reading")
             category = _prompt("Category path")
             name = _prompt("New category name")
@@ -194,6 +175,61 @@ def _add_feed(config: Path) -> None:
             str(config),
         ]
     )
+
+
+def _schedule_menu(config: Path) -> None:
+    while True:
+        print(
+            "\n  Schedules\n"
+            "  [1] List\n"
+            "  [2] Add\n"
+            "  [3] Edit\n"
+            "  [4] Enable\n"
+            "  [5] Disable\n"
+            "  [6] Remove\n"
+            "  [7] Apply\n"
+            "  [8] Status\n"
+            "  [b] Back"
+        )
+        choice = _prompt("Choose", "1").lower()
+        if choice == "b":
+            return
+        if choice == "1":
+            main(["schedule", "list", "--config", str(config)])
+        elif choice in {"2", "3"}:
+            schedule_id = _prompt("Schedule id")
+            if schedule_id:
+                arguments = ["schedule", "add" if choice == "2" else "edit", schedule_id]
+                arguments.extend(_schedule_recurrence_prompt())
+                main([*arguments, "--config", str(config)])
+        elif choice in {"4", "5"}:
+            schedule_id = _prompt("Schedule id")
+            if schedule_id:
+                command = "enable" if choice == "4" else "disable"
+                main(["schedule", command, schedule_id, "--config", str(config)])
+        elif choice == "6":
+            schedule_id = _prompt("Schedule id")
+            if schedule_id and _prompt(f"Remove {schedule_id}?", "n").lower() == "y":
+                main(["schedule", "remove", schedule_id, "--config", str(config)])
+        elif choice == "7":
+            main(["schedule", "apply", "--config", str(config)])
+        elif choice == "8":
+            main(["schedule", "status", "--config", str(config)])
+        else:
+            print("Unknown choice")
+
+
+def _schedule_recurrence_prompt() -> list[str]:
+    frequency = _prompt("Frequency (daily, weekly, monthly, once)", "daily").lower()
+    if frequency == "weekly":
+        recurrence = ["--weekly", _prompt("Weekdays, comma-separated", "mon")]
+    elif frequency == "monthly":
+        recurrence = ["--monthly", _prompt("Day of month", "1")]
+    elif frequency == "once":
+        recurrence = ["--once", _prompt("Date (YYYY-MM-DD)")]
+    else:
+        recurrence = ["--daily"]
+    return [*recurrence, "--at", _prompt("Local time (HH:MM)", "07:00")]
 
 
 def _print_status(config: Path) -> None:
