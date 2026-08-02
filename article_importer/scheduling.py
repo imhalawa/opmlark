@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 from tempfile import NamedTemporaryFile
+import xml.etree.ElementTree as ElementTree
 
 from article_importer.configuration import Schedule, load_config
 from article_importer.schedule_config import (
@@ -59,13 +60,18 @@ def schedule_info(
         raise WorkspaceError(
             "Scheduling cannot use a temporary npx command; run `npm install --global opmlark` first"
         )
+    platform = _platform()
     arguments = f'run --config {_quote(str(config_path.resolve()))}'
-    if _platform() == "windows" and Path(executable).suffix.lower() in {".cmd", ".bat"}:
-        command = f'cmd.exe /D /C ""{executable}" {arguments}"'
+    if platform == "windows":
+        executable_part = f'"{executable}"' if " " in executable else executable
+        log_path = config_path.parent / "data" / "scheduler.log"
+        command = (
+            f'cmd.exe /D /C "{executable_part} {arguments} '
+            f'>> "{log_path.resolve()}" 2>&1"'
+        )
     else:
         command = f"{_quote(executable)} {arguments}"
     digest = _workspace_digest(config_path)
-    platform = _platform()
     if platform == "windows":
         name = f"OPMLark - {config_path.parent.name} - {digest} - {schedule.id}"
         artifact = name
@@ -103,7 +109,7 @@ def windows_create_arguments(info: ScheduleInfo, schedule: Schedule) -> list[str
     elif schedule.frequency == "monthly":
         arguments.extend(["/D", str(schedule.day)])
     elif schedule.frequency == "once":
-        arguments.extend(["/SD", str(schedule.date)])
+        arguments.extend(["/SD", _windows_start_date(str(schedule.date))])
     arguments.extend(["/ST", schedule.at, "/F"])
     return arguments
 
@@ -170,7 +176,7 @@ def schedule_status(config_path: Path) -> tuple[ScheduleChange, ...]:
         statuses = []
         for schedule in schedules:
             if not schedule.enabled:
-                action = "disabled"
+                action = "drifted" if schedule.id in current else "disabled"
             else:
                 expected = cron_line(config_path, schedule, schedule_info(config_path, schedule))
                 action = "installed" if current.get(schedule.id) == expected else (
@@ -188,7 +194,7 @@ def schedule_status(config_path: Path) -> tuple[ScheduleChange, ...]:
         statuses = []
         for schedule in schedules:
             if not schedule.enabled:
-                action = "disabled"
+                action = "drifted" if schedule.id in current else "disabled"
             else:
                 expected = launchd_plist(config_path, schedule, schedule_info(config_path, schedule))
                 path = current.get(schedule.id)
@@ -204,15 +210,19 @@ def schedule_status(config_path: Path) -> tuple[ScheduleChange, ...]:
 
     current = _windows_managed(config_path)
     desired_ids = {item.id for item in schedules}
-    statuses = [
-        ScheduleChange(
-            schedule.id,
-            "disabled" if not schedule.enabled else (
-                "installed" if schedule.id in current else "missing"
-            ),
-        )
-        for schedule in schedules
-    ]
+    statuses = []
+    for schedule in schedules:
+        if not schedule.enabled:
+            action = "drifted" if schedule.id in current else "disabled"
+        elif schedule.id not in current:
+            action = "missing"
+        else:
+            action = (
+                "installed"
+                if _windows_task_matches(current[schedule.id], schedule_info(config_path, schedule), schedule)
+                else "drifted"
+            )
+        statuses.append(ScheduleChange(schedule.id, action))
     statuses.extend(
         ScheduleChange(schedule_id, "stale")
         for schedule_id in sorted(set(current) - desired_ids)
@@ -244,17 +254,15 @@ def install_schedule(config_path: Path, time: str = "07:00") -> ScheduleInfo:
 
 
 def remove_native_schedule(config_path: Path, schedule_id: str) -> ScheduleChange:
-    schedule = next(
-        (item for item in load_config(config_path).schedules if item.id == schedule_id),
-        Schedule(schedule_id, "daily", "07:00"),
-    )
-    info = schedule_info(config_path, schedule)
     try:
         if _platform() == "windows":
-            _run_checked(["schtasks.exe", "/Delete", "/TN", info.name, "/F"])
+            current = _windows_managed(config_path)
+            if schedule_id in current:
+                _run_checked(["schtasks.exe", "/Delete", "/TN", current[schedule_id], "/F"])
         elif _platform() == "launchd":
-            path = Path(str(info.artifact))
-            _launchctl_remove(path, info.name)
+            current = _launchd_managed(config_path)
+            if path := current.get(schedule_id):
+                _launchctl_remove(path, path.stem)
         else:
             current = _read_crontab()
             marker = _cron_marker(config_path, schedule_id)
@@ -281,7 +289,13 @@ def remove_schedule(config_path: Path) -> ScheduleInfo:
 
 def _apply_cron(config_path: Path) -> tuple[ScheduleChange, ...]:
     schedules = load_config(config_path).schedules
-    current_text = _read_crontab()
+    try:
+        current_text = _read_crontab()
+    except (OSError, WorkspaceError) as error:
+        return tuple(
+            ScheduleChange(schedule.id, "failed", False, str(error))
+            for schedule in schedules
+        )
     current = _cron_entries(config_path, current_text)
     desired_ids = {item.id for item in schedules}
     changes: list[ScheduleChange] = []
@@ -297,7 +311,13 @@ def _apply_cron(config_path: Path) -> tuple[ScheduleChange, ...]:
                 ScheduleChange(schedule.id, "removed" if schedule.id in current else "disabled")
             )
             continue
-        expected = cron_line(config_path, schedule, schedule_info(config_path, schedule))
+        try:
+            expected = cron_line(config_path, schedule, schedule_info(config_path, schedule))
+        except (OSError, WorkspaceError, ValueError) as error:
+            changes.append(ScheduleChange(schedule.id, "failed", False, str(error)))
+            if schedule.id in current:
+                new_lines.append(current[schedule.id])
+            continue
         action = "unchanged" if current.get(schedule.id) == expected else (
             "updated" if schedule.id in current else "created"
         )
@@ -309,23 +329,38 @@ def _apply_cron(config_path: Path) -> tuple[ScheduleChange, ...]:
     )
     contents = _lines(new_lines)
     if contents != current_text:
-        _write_crontab(contents)
+        try:
+            _write_crontab(contents)
+        except (OSError, WorkspaceError) as error:
+            return tuple(
+                item if item.action == "unchanged" else ScheduleChange(item.id, "failed", False, str(error))
+                for item in changes
+            )
     return tuple(changes)
 
 
 def _apply_windows(config_path: Path) -> tuple[ScheduleChange, ...]:
     schedules = load_config(config_path).schedules
-    current = _windows_managed(config_path)
+    try:
+        current = _windows_managed(config_path)
+    except (OSError, WorkspaceError) as error:
+        return tuple(
+            ScheduleChange(schedule.id, "failed", False, str(error))
+            for schedule in schedules
+        )
     desired_ids = {item.id for item in schedules}
     changes: list[ScheduleChange] = []
     for schedule in schedules:
         try:
             info = schedule_info(config_path, schedule)
             if schedule.enabled:
-                _run_checked(windows_create_arguments(info, schedule))
-                changes.append(
-                    ScheduleChange(schedule.id, "updated" if schedule.id in current else "created")
-                )
+                if schedule.id in current and _windows_task_matches(current[schedule.id], info, schedule):
+                    changes.append(ScheduleChange(schedule.id, "unchanged"))
+                else:
+                    _run_checked(windows_create_arguments(info, schedule))
+                    changes.append(
+                        ScheduleChange(schedule.id, "updated" if schedule.id in current else "created")
+                    )
             elif schedule.id in current:
                 _run_checked(["schtasks.exe", "/Delete", "/TN", current[schedule.id], "/F"])
                 changes.append(ScheduleChange(schedule.id, "removed"))
@@ -393,6 +428,58 @@ def _windows_managed(config_path: Path) -> dict[str, str]:
         if name.startswith(prefix):
             managed[name[len(prefix) :]] = name
     return managed
+
+
+def _windows_task_matches(name: str, info: ScheduleInfo, schedule: Schedule) -> bool:
+    result = subprocess.run(
+        ["schtasks.exe", "/Query", "/TN", name, "/XML"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        return False
+    try:
+        root = ElementTree.fromstring(result.stdout)
+    except ElementTree.ParseError:
+        return False
+    elements = list(root.iter())
+    boundary = next(
+        (element.text or "" for element in elements if _local_name(element.tag) == "StartBoundary"),
+        "",
+    )
+    if "T" not in boundary or boundary.split("T", 1)[1][:5] != schedule.at:
+        return False
+    command = next(
+        (element.text or "" for element in elements if _local_name(element.tag) == "Command"),
+        "",
+    )
+    arguments = next(
+        (element.text or "" for element in elements if _local_name(element.tag) == "Arguments"),
+        "",
+    )
+    actual_action = f"{command} {arguments}".strip().casefold()
+    if info.command.casefold() not in actual_action and actual_action not in info.command.casefold():
+        return False
+    tags = {_local_name(element.tag) for element in elements}
+    if schedule.frequency == "daily":
+        return "ScheduleByDay" in tags
+    if schedule.frequency == "weekly":
+        day_names = {
+            "mon": "Monday", "tue": "Tuesday", "wed": "Wednesday",
+            "thu": "Thursday", "fri": "Friday", "sat": "Saturday", "sun": "Sunday",
+        }
+        return "ScheduleByWeek" in tags and {
+            day_names[day] for day in schedule.days
+        }.issubset(tags)
+    if schedule.frequency == "monthly":
+        days = {
+            element.text
+            for element in elements
+            if _local_name(element.tag) == "Day"
+        }
+        return "ScheduleByMonth" in tags and str(schedule.day) in days
+    return "TimeTrigger" in tags and boundary.startswith(f"{schedule.date}T")
 
 
 def _launchd_managed(config_path: Path) -> dict[str, Path]:
@@ -502,6 +589,24 @@ def _time_parts(value: str) -> tuple[int, int]:
     return hour, minute
 
 
+def _windows_start_date(value: str) -> str:
+    script = (
+        "$date = [datetime]::ParseExact('"
+        + value
+        + "', 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture); "
+        "$date.ToString((Get-Culture).DateTimeFormat.ShortDatePattern)"
+    )
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode or not result.stdout.strip():
+        raise WorkspaceError(result.stderr.strip() or "Unable to format Windows schedule date")
+    return result.stdout.strip()
+
+
 def _workspace_digest(config_path: Path) -> str:
     return hashlib.sha256(str(config_path.resolve()).encode()).hexdigest()[:12]
 
@@ -513,6 +618,10 @@ def _launchd_directory() -> Path:
 def _lines(lines: list[str]) -> str:
     contents = "\n".join(line for line in lines if line.strip()).strip()
     return contents + ("\n" if contents else "")
+
+
+def _local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
 
 
 def _quote(value: str) -> str:

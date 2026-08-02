@@ -428,6 +428,7 @@ def _schedule_status(args: argparse.Namespace) -> int:
 def _schedule_from_args(
     args: argparse.Namespace, *, current: Schedule | None = None
 ) -> Schedule:
+    interactive = sys.stdin.isatty() and sys.stdout.isatty()
     frequency: str | None = None
     days: tuple[str, ...] = ()
     day: int | None = None
@@ -446,7 +447,7 @@ def _schedule_from_args(
     elif current is not None:
         frequency = current.frequency
         days, day, date_value = current.days, current.day, current.date
-    elif sys.stdin.isatty() and sys.stdout.isatty():
+    elif interactive:
         frequency = input("Frequency (daily, weekly, monthly, once) [daily]: ").strip().casefold() or "daily"
         if frequency == "weekly":
             days = tuple(item.strip().casefold() for item in input("Weekdays (comma-separated): ").split(",") if item.strip())
@@ -456,7 +457,14 @@ def _schedule_from_args(
             date_value = input("Date (YYYY-MM-DD): ").strip()
     else:
         raise WorkspaceError("Choose one recurrence: --daily, --weekly, --monthly, or --once")
-    at = args.at or (current.at if current is not None else "07:00")
+    if args.at:
+        at = args.at
+    elif current is not None:
+        at = current.at
+    elif interactive:
+        at = input("Local time (HH:MM) [07:00]: ").strip() or "07:00"
+    else:
+        at = "07:00"
     enabled = current.enabled if current is not None else True
     return Schedule(args.id, frequency, at, enabled, days, day, date_value)
 

@@ -6,13 +6,16 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from article_importer.configuration import Schedule
+from article_importer.configuration import Schedule, load_config
 from article_importer.schedule_config import add_schedule_config
 from article_importer.scheduling import (
+    ScheduleChange,
     ScheduleInfo,
     apply_schedules,
     cron_line,
+    install_schedule,
     launchd_plist,
+    remove_schedule,
     schedule_info,
     schedule_status,
     windows_create_arguments,
@@ -36,6 +39,7 @@ class SchedulingRenderingTests(unittest.TestCase):
 
             self.assertTrue(info.command.startswith('cmd.exe /D /C ""'))
             self.assertIn("opmlark.cmd", info.command)
+            self.assertIn("scheduler.log", info.command)
 
     def test_temporary_npx_command_is_rejected_for_schedule(self) -> None:
         with TemporaryDirectory() as directory:
@@ -83,11 +87,13 @@ class SchedulingRenderingTests(unittest.TestCase):
             (Schedule("monthly", "monthly", "18:00", day=15), ("/D", "15")),
             (Schedule("once", "once", "12:00", date="2026-09-15"), ("/SD", "2026-09-15")),
         )
-        for schedule, expected_pair in cases:
-            with self.subTest(schedule=schedule.id):
-                arguments = windows_create_arguments(info, schedule)
-                position = arguments.index(expected_pair[0])
-                self.assertEqual(expected_pair[1], arguments[position + 1])
+        with patch("article_importer.scheduling._windows_start_date", return_value="15/09/2026"):
+            for schedule, expected_pair in cases:
+                with self.subTest(schedule=schedule.id):
+                    arguments = windows_create_arguments(info, schedule)
+                    position = arguments.index(expected_pair[0])
+                    expected = "15/09/2026" if schedule.frequency == "once" else expected_pair[1]
+                    self.assertEqual(expected, arguments[position + 1])
 
     def test_launchd_plist_uses_calendar_intervals_and_date_guard(self) -> None:
         info = ScheduleInfo("launchd", "io.opmlark.test.once", "12:00", "opmlark run", "once")
@@ -105,6 +111,28 @@ class SchedulingRenderingTests(unittest.TestCase):
 
 
 class SchedulingReconciliationTests(unittest.TestCase):
+    def test_legacy_default_install_and_remove_aliases_update_configuration(self) -> None:
+        with TemporaryDirectory() as directory:
+            config = Path(initialize_workspace(Path(directory))["config"])
+            with (
+                patch("article_importer.scheduling._platform", return_value="cron"),
+                patch("article_importer.scheduling.shutil.which", return_value="/usr/bin/opmlark"),
+                patch(
+                    "article_importer.scheduling.apply_schedules",
+                    return_value=(ScheduleChange("default", "created"),),
+                ),
+            ):
+                installed = install_schedule(config, "06:45")
+                with patch(
+                    "article_importer.scheduling.remove_native_schedule",
+                    return_value=ScheduleChange("default", "removed"),
+                ):
+                    removed = remove_schedule(config)
+
+            self.assertEqual("06:45", installed.time)
+            self.assertEqual(installed.name, removed.name)
+            self.assertEqual((), load_config(config).schedules)
+
     def test_cron_apply_reconciles_multiple_entries_and_preserves_unrelated_lines(self) -> None:
         with TemporaryDirectory() as directory:
             config = Path(initialize_workspace(Path(directory))["config"])
@@ -158,6 +186,20 @@ class SchedulingReconciliationTests(unittest.TestCase):
                 {item.id: item.action for item in statuses},
             )
 
+    def test_status_reports_disabled_native_artifact_as_drift(self) -> None:
+        with TemporaryDirectory() as directory:
+            config = Path(initialize_workspace(Path(directory))["config"])
+            add_schedule_config(config, Schedule("disabled", "daily", "09:00", False))
+            with (
+                patch("article_importer.scheduling._platform", return_value="cron"),
+                patch("article_importer.scheduling.shutil.which", return_value="/usr/bin/opmlark"),
+            ):
+                info = schedule_info(config, Schedule("disabled", "daily", "09:00", False))
+                with patch("article_importer.scheduling._read_crontab", return_value=cron_line(config, Schedule("disabled", "daily", "09:00"), info)):
+                    statuses = schedule_status(config)
+
+            self.assertEqual("drifted", statuses[0].action)
+
     def test_windows_apply_continues_after_one_schedule_fails(self) -> None:
         with TemporaryDirectory() as directory:
             config = Path(initialize_workspace(Path(directory))["config"])
@@ -181,6 +223,119 @@ class SchedulingReconciliationTests(unittest.TestCase):
                 {"first": ("failed", False), "second": ("created", True)},
                 {item.id: (item.action, item.ok) for item in changes},
             )
+
+    def test_windows_discovery_failure_is_reported_for_each_schedule(self) -> None:
+        with TemporaryDirectory() as directory:
+            config = Path(initialize_workspace(Path(directory))["config"])
+            add_schedule_config(config, Schedule("morning", "daily", "07:00"))
+            add_schedule_config(config, Schedule("evening", "daily", "19:00"))
+            with (
+                patch("article_importer.scheduling._platform", return_value="windows"),
+                patch("article_importer.scheduling._windows_managed", side_effect=WorkspaceError("denied")),
+            ):
+                changes = apply_schedules(config)
+
+            self.assertEqual(
+                {"morning": False, "evening": False},
+                {item.id: item.ok for item in changes},
+            )
+
+    def test_windows_apply_reports_unchanged_when_native_task_matches(self) -> None:
+        with TemporaryDirectory() as directory:
+            config = Path(initialize_workspace(Path(directory))["config"])
+            add_schedule_config(config, Schedule("morning", "daily", "07:00"))
+            with (
+                patch("article_importer.scheduling._platform", return_value="windows"),
+                patch("article_importer.scheduling.shutil.which", return_value=r"C:\bin\opmlark.cmd"),
+                patch("article_importer.scheduling._windows_managed", return_value={"morning": "native-name"}),
+                patch("article_importer.scheduling._windows_task_matches", return_value=True),
+                patch("article_importer.scheduling._run_checked") as checked,
+            ):
+                changes = apply_schedules(config)
+
+            self.assertEqual("unchanged", changes[0].action)
+            checked.assert_not_called()
+
+    def test_windows_task_xml_is_compared_with_desired_trigger_and_action(self) -> None:
+        from article_importer.scheduling import _windows_task_matches
+
+        schedule = Schedule("weekend", "weekly", "09:30", days=("sat", "sun"))
+        info = ScheduleInfo(
+            "windows",
+            "OPMLark task",
+            "09:30",
+            'cmd.exe /D /C "opmlark run --config C:\\workspace\\config.toml"',
+            "weekend",
+        )
+        xml = """<Task xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+          <Triggers><CalendarTrigger><StartBoundary>2026-08-02T09:30:00</StartBoundary>
+          <ScheduleByWeek><DaysOfWeek><Saturday/><Sunday/></DaysOfWeek></ScheduleByWeek>
+          </CalendarTrigger></Triggers><Actions><Exec><Command>cmd.exe</Command>
+          <Arguments>/D /C "opmlark run --config C:\\workspace\\config.toml"</Arguments>
+          </Exec></Actions></Task>"""
+        result = type("Result", (), {"returncode": 0, "stdout": xml})()
+        with patch("article_importer.scheduling.subprocess.run", return_value=result):
+            self.assertTrue(_windows_task_matches("OPMLark task", info, schedule))
+            self.assertFalse(
+                _windows_task_matches(
+                    "OPMLark task",
+                    info,
+                    Schedule("weekend", "weekly", "10:30", days=("sat", "sun")),
+                )
+            )
+
+    def test_cron_apply_returns_failed_changes_when_crontab_cannot_be_read(self) -> None:
+        with TemporaryDirectory() as directory:
+            config = Path(initialize_workspace(Path(directory))["config"])
+            add_schedule_config(config, Schedule("morning", "daily", "07:00"))
+            add_schedule_config(config, Schedule("evening", "daily", "19:00"))
+            with (
+                patch("article_importer.scheduling._platform", return_value="cron"),
+                patch("article_importer.scheduling._read_crontab", side_effect=WorkspaceError("denied")),
+            ):
+                changes = apply_schedules(config)
+
+            self.assertEqual(
+                {"morning": ("failed", False), "evening": ("failed", False)},
+                {item.id: (item.action, item.ok) for item in changes},
+            )
+
+    def test_cron_render_failure_keeps_the_previous_managed_line(self) -> None:
+        with TemporaryDirectory() as directory:
+            config = Path(initialize_workspace(Path(directory))["config"])
+            schedule = Schedule("morning", "daily", "07:00")
+            add_schedule_config(config, schedule)
+            with (
+                patch("article_importer.scheduling._platform", return_value="cron"),
+                patch("article_importer.scheduling.shutil.which", return_value="/usr/bin/opmlark"),
+            ):
+                previous = cron_line(config, schedule, schedule_info(config, schedule))
+            with (
+                patch("article_importer.scheduling._platform", return_value="cron"),
+                patch("article_importer.scheduling._read_crontab", return_value=previous + "\n"),
+                patch("article_importer.scheduling.schedule_info", side_effect=WorkspaceError("missing executable")),
+                patch("article_importer.scheduling._write_crontab") as write,
+            ):
+                changes = apply_schedules(config)
+
+            self.assertFalse(changes[0].ok)
+            write.assert_not_called()
+
+    def test_removing_an_absent_windows_task_succeeds_without_executable(self) -> None:
+        from article_importer.scheduling import remove_native_schedule
+
+        with TemporaryDirectory() as directory:
+            config = Path(initialize_workspace(Path(directory))["config"])
+            add_schedule_config(config, Schedule("missing", "daily", "07:00"))
+            with (
+                patch("article_importer.scheduling._platform", return_value="windows"),
+                patch("article_importer.scheduling._windows_managed", return_value={}),
+                patch("article_importer.scheduling.shutil.which", return_value=None),
+            ):
+                change = remove_native_schedule(config, "missing")
+
+            self.assertTrue(change.ok)
+            self.assertEqual("removed", change.action)
 
     def test_launchd_apply_replaces_managed_files_and_removes_stale(self) -> None:
         with TemporaryDirectory() as directory:

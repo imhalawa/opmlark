@@ -7,7 +7,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from article_importer.cli import main
+from article_importer.cli import _parser, _schedule_from_args, main
 from article_importer.configuration import Schedule, load_config
 from article_importer.schedule_config import add_schedule_config
 from article_importer.scheduling import ScheduleChange, schedule_info
@@ -278,6 +278,38 @@ class WorkspaceTests(unittest.TestCase):
 
             self.assertEqual(1, result)
             self.assertEqual("kept", load_config(config).schedules[0].id)
+
+    def test_interactive_schedule_add_prompts_for_recurrence_and_time(self) -> None:
+        args = _parser().parse_args(["schedule", "add", "weekend"])
+        with (
+            patch("article_importer.cli.sys.stdin.isatty", return_value=True),
+            patch("article_importer.cli.sys.stdout.isatty", return_value=True),
+            patch("builtins.input", side_effect=["weekly", "sat,sun", "09:30"]) as prompt,
+        ):
+            schedule = _schedule_from_args(args)
+
+        self.assertEqual(
+            Schedule("weekend", "weekly", "09:30", days=("sat", "sun")),
+            schedule,
+        )
+        self.assertEqual(3, prompt.call_count)
+
+    def test_schedule_status_has_stable_json_output(self) -> None:
+        with TemporaryDirectory() as directory:
+            config = Path(initialize_workspace(Path(directory))["config"])
+            output = StringIO()
+            with (
+                patch(
+                    "article_importer.cli.schedule_status",
+                    return_value=(ScheduleChange("morning", "missing"),),
+                ),
+                redirect_stdout(output),
+            ):
+                result = main(["schedule", "status", "--config", str(config), "--json"])
+
+            self.assertEqual(0, result)
+            self.assertIn('"id": "morning"', output.getvalue())
+            self.assertIn('"action": "missing"', output.getvalue())
 
 
 if __name__ == "__main__":
