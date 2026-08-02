@@ -36,6 +36,20 @@ NEW = FeedEntry(
 
 
 class StateStoreTests(unittest.TestCase):
+    def test_failed_entry_stops_retrying_after_attempt_budget(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "state.sqlite3"
+            with StateStore(path) as state:
+                first = state.candidates(SUBSCRIPTION, [ENTRY], max_attempts=2)
+                self.assertEqual((ENTRY,), first.candidates)
+                state.mark_failed(SUBSCRIPTION.feed_url, ENTRY.url, "first")
+                second = state.candidates(SUBSCRIPTION, [ENTRY], max_attempts=2)
+                self.assertEqual((ENTRY,), second.candidates)
+                state.mark_failed(SUBSCRIPTION.feed_url, ENTRY.url, "second")
+                exhausted = state.candidates(SUBSCRIPTION, [ENTRY], max_attempts=2)
+
+            self.assertEqual((), exhausted.candidates)
+
     def setUp(self) -> None:
         self.temporary_directory = TemporaryDirectory()
         self.database = Path(self.temporary_directory.name) / "articles.sqlite3"

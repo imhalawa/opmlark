@@ -90,7 +90,7 @@ def validate_catalogs(
 
 
 def _fetch_feed_bytes(url: str) -> bytes:
-    request = Request(url, headers={"User-Agent": "opml-defuddle-articles/1.0"})
+    request = Request(url, headers={"User-Agent": "opmlark/0.1"})
     with urlopen(request, timeout=30) as response:
         return response.read()
 

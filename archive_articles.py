@@ -27,11 +27,12 @@ def main(arguments: list[str] | None = None) -> int:
     args = parser.parse_args(arguments)
 
     project_root = Path(__file__).resolve().parent
-    data_path = project_root / "data"
+    config_path = (args.config or project_root / "config.toml").resolve()
+    data_path = config_path.parent / "data"
     data_path.mkdir(parents=True, exist_ok=True)
     logger = _configure_logger(data_path / "archive-importer.log")
     try:
-        config = load_config(args.config or project_root / "config.toml")
+        config = load_config(config_path)
         service = ArchiveImportService(
             config,
             data_path / "articles.sqlite3",

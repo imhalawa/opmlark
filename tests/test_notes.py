@@ -146,7 +146,7 @@ class NotesTests(unittest.TestCase):
         output = create_note(self.articles, build_frontmatter(ARTICLE, ENTRY, NOW), body)
         saved = output.read_text(encoding="utf-8")
 
-        self.assertIn("ingested_by: opml-defuddle-articles\n", saved)
+        self.assertIn("ingested_by: opmlark\n", saved)
         self.assertTrue(saved.endswith(body))
         self.assertEqual(
             "---\n"
@@ -159,7 +159,7 @@ class NotesTests(unittest.TestCase):
             'publication_date_source: "feed"\n'
             'imported: "2026-07-18T07:00:00+00:00"\n'
             'author: "Ada Lovelace"\n'
-            "ingested_by: opml-defuddle-articles\n"
+            "ingested_by: opmlark\n"
             "tags:\n"
             "  - source/articles\n"
             "  - topic/system-design\n"

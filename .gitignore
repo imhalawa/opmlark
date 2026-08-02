@@ -3,3 +3,8 @@ __pycache__/
 *.py[cod]
 .venv/
 .superpowers/
+node_modules/
+*.tgz
+dist/
+build/
+*.egg-info/

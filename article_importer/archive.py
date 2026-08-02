@@ -105,7 +105,12 @@ class ArchiveImportService:
                 entries = tuple(
                     FeedEntry(url, url, None, archive_source.subscription) for url in urls
                 )
-                batch = state.candidates(archive_source.subscription, entries, cutoff=None)
+                batch = state.candidates(
+                    archive_source.subscription,
+                    entries,
+                    cutoff=None,
+                    max_attempts=self._config.max_attempts,
+                )
                 summary = _with_summary(summary, pending=summary.pending + len(batch.candidates))
 
                 for entry in batch.candidates:
@@ -160,7 +165,7 @@ def select_archive_sources(source: str) -> tuple[ArchiveSource, ...]:
 
 def fetch_archive_bytes(url: str) -> bytes:
     """Fetch an archive page using the same explicit request policy as feeds."""
-    request = Request(url, headers={"User-Agent": "opml-defuddle-articles/1.0"})
+    request = Request(url, headers={"User-Agent": "opmlark/0.1"})
     with urlopen(request, timeout=30) as response:
         return response.read()
 

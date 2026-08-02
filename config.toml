@@ -2,6 +2,7 @@
 vault_path = "C:/Users/imhal/Documents/Traces"
 defuddle_executable = "defuddle"
 lookback_days = 90
+max_attempts = 3
 
 [feed_catalog]
 disabled_catalogs = []

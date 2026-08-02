@@ -17,7 +17,7 @@ _TRAILING_WINDOWS_UNSAFE = re.compile(r"[. ]+$")
 _FRONTMATTER_OPENING = re.compile(r"\A---(\r?\n)")
 _FRONTMATTER_CLOSING = re.compile(r"^---(?:\r?\n|$)", re.MULTILINE)
 _IMPORTER_MARKER = re.compile(
-    r"^ingested_by:\s*opml-defuddle-articles\s*$", re.MULTILINE
+    r"^ingested_by:\s*(?:opmlark|opml-defuddle-articles)\s*$", re.MULTILINE
 )
 _TYPE_FIELD = re.compile(r"^type\s*:", re.MULTILINE)
 _ARTICLE_TYPE_FIELD = re.compile(r'^type\s*:\s*(?:"article"|article)\s*$', re.MULTILINE)
@@ -44,7 +44,7 @@ def build_frontmatter(
         lines.append(f"author: {_yaml_scalar(article.author)}")
     lines.extend(
         [
-            "ingested_by: opml-defuddle-articles",
+            "ingested_by: opmlark",
             "tags:",
             "  - source/articles",
             f"  - topic/{_tag(entry.subscription.topic)}",

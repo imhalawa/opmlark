@@ -56,7 +56,8 @@ def main(arguments: list[str] | None = None) -> int:
         return 1
 
     project_root = Path(__file__).resolve().parent
-    config_path = args.config or project_root / "config.toml"
+    config_path = (args.config or project_root / "config.toml").resolve()
+    data_path = config_path.parent / "data"
     if args.add_article_type:
         try:
             config = load_config(config_path)
@@ -79,7 +80,7 @@ def main(arguments: list[str] | None = None) -> int:
         try:
             config = load_config(config_path)
             moved = group_articles_by_source(
-                config.articles_path, project_root / "data" / "articles.sqlite3"
+                config.articles_path, data_path / "articles.sqlite3"
             )
         except (ConfigurationError, OSError) as error:
             print(f"ERROR: {error}")
@@ -100,7 +101,6 @@ def main(arguments: list[str] | None = None) -> int:
             print(f"ERROR: {error}")
         return 1 if validation.errors else 0
 
-    data_path = project_root / "data"
     if args.dry_run:
         logger = _dry_run_logger()
     else:

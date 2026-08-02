@@ -1,0 +1,47 @@
+{
+  "name": "opmlark",
+  "version": "0.1.0",
+  "description": "Watch OPML feeds and preserve new articles as clean Markdown.",
+  "license": "MIT",
+  "author": "OPMLark contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/imhalawa/opmlark.git"
+  },
+  "homepage": "https://github.com/imhalawa/opmlark#readme",
+  "bugs": "https://github.com/imhalawa/opmlark/issues",
+  "type": "module",
+  "bin": {
+    "opmlark": "bin/opmlark.js"
+  },
+  "files": [
+    "article_importer/**/*.py",
+    "bin/opmlark.js",
+    "CHANGELOG.md",
+    "CONTEXT.md",
+    "CONTRIBUTING.md",
+    "LICENSE",
+    "README.md",
+    "SECURITY.md"
+  ],
+  "scripts": {
+    "test": "python -m unittest discover -v",
+    "smoke": "node bin/opmlark.js --version"
+  },
+  "dependencies": {
+    "defuddle": "^0.19.2"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "opml",
+    "rss",
+    "atom",
+    "markdown",
+    "defuddle",
+    "obsidian",
+    "tui",
+    "offline-reading"
+  ]
+}

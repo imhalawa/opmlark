@@ -22,12 +22,13 @@ class FeedCatalog:
 
 @dataclass(frozen=True)
 class ImporterConfig:
-    vault_path: Path
+    vault_path: Path | None
     articles_path: Path
     defuddle_executable: str
     lookback_days: int = 90
     feed_catalogs: tuple[FeedCatalog, ...] = ()
     disabled_sources: frozenset[str] = frozenset()
+    max_attempts: int = 3
 
 
 def load_config(path: Path) -> ImporterConfig:
@@ -39,19 +40,29 @@ def load_config(path: Path) -> ImporterConfig:
             importer = raw_config.get("importer")
         if not isinstance(importer, dict):
             raise ConfigurationError("importer must be a TOML table")
-        vault_value = importer["vault_path"]
-    except (ConfigurationError, KeyError, OSError, tomllib.TOMLDecodeError) as error:
+    except (ConfigurationError, OSError, tomllib.TOMLDecodeError) as error:
         raise ConfigurationError(f"Unable to read importer configuration: {error}") from error
 
-    if not isinstance(vault_value, str) or not vault_value:
-        raise ConfigurationError("importer.vault_path must be a non-empty string")
-
-    vault_path = _resolve_path(vault_value, config_path.parent)
-    articles_path = vault_path / "Sources" / "Articles"
-    if not vault_path.is_dir() or not articles_path.is_dir():
-        raise ConfigurationError(
-            f"Configured vault must contain Sources/Articles: {vault_path}"
-        )
+    output_value = importer.get("output_path")
+    vault_value = importer.get("vault_path")
+    if output_value is not None:
+        if not isinstance(output_value, str) or not output_value:
+            raise ConfigurationError("importer.output_path must be a non-empty string")
+        vault_path = None
+        articles_path = _resolve_path(output_value, config_path.parent)
+        if not articles_path.is_dir():
+            raise ConfigurationError(f"Configured output directory does not exist: {articles_path}")
+    else:
+        if not isinstance(vault_value, str) or not vault_value:
+            raise ConfigurationError(
+                "importer.output_path or importer.vault_path must be a non-empty string"
+            )
+        vault_path = _resolve_path(vault_value, config_path.parent)
+        articles_path = vault_path / "Sources" / "Articles"
+        if not vault_path.is_dir() or not articles_path.is_dir():
+            raise ConfigurationError(
+                f"Configured vault must contain Sources/Articles: {vault_path}"
+            )
 
     executable_value = importer.get("defuddle_executable", "defuddle")
     if not isinstance(executable_value, str) or not executable_value:
@@ -62,6 +73,10 @@ def load_config(path: Path) -> ImporterConfig:
     if isinstance(lookback_days, bool) or not isinstance(lookback_days, int) or lookback_days <= 0:
         raise ConfigurationError("importer.lookback_days must be a positive integer")
 
+    max_attempts = importer.get("max_attempts", 3)
+    if isinstance(max_attempts, bool) or not isinstance(max_attempts, int) or max_attempts <= 0:
+        raise ConfigurationError("importer.max_attempts must be a positive integer")
+
     catalogs = _read_catalogs(raw_config, config_path.parent)
     disabled_sources = _read_disabled_sources(raw_config)
     return ImporterConfig(
@@ -71,6 +86,7 @@ def load_config(path: Path) -> ImporterConfig:
         lookback_days,
         catalogs,
         disabled_sources,
+        max_attempts,
     )
 
 

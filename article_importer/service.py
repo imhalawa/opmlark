@@ -67,6 +67,7 @@ class ImportService:
                         cutoff=cutoff,
                         observed_at=observed_at,
                         dry_run=dry_run,
+                        max_attempts=self._config.max_attempts,
                     )
                 except Exception as error:
                     self._logger.error("Failed feed %s: %s", subscription.feed_url, error)
@@ -133,7 +134,7 @@ class ImportService:
 
 def fetch_feed_bytes(url: str) -> bytes:
     """Fetch a feed using the production request policy."""
-    request = Request(url, headers={"User-Agent": "opml-defuddle-articles/1.0"})
+    request = Request(url, headers={"User-Agent": "opmlark/0.1"})
     with urlopen(request, timeout=30) as response:
         return response.read()
 

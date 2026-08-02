@@ -1,110 +1,180 @@
-# OPML Defuddle Articles
+# OPMLark
 
-Imports articles newly published by the RSS and Atom feeds in the configured topic catalogs under `feeds/` into an Obsidian vault. Each imported note is processed by Defuddle and carries the marker `ingested_by: opml-defuddle-articles`.
+> Give it OPML. Get clean Markdown.
+
+OPMLark monitors the RSS and Atom feeds in your OPML catalogs, extracts newly published articles with [Defuddle](https://github.com/kepano/defuddle), and preserves them as readable Markdown.
+
+Collection is automatic and token-free. The resulting files work with Obsidian, ordinary folders, Git, full-text search, scripts, and optional AI tools.
+
+## Why OPMLark
+
+- **Open inputs:** subscriptions and categories remain normal OPML.
+- **Open outputs:** every article is a normal Markdown file with YAML frontmatter.
+- **Local-first:** SQLite tracks ingestion state beside the workspace.
+- **Write-once:** OPMLark never rewrites a successfully imported article, so annotations are safe.
+- **AI-optional:** scheduled collection consumes no AI tokens. AI can query selected files later.
+- **Human and machine friendly:** use the TUI, non-interactive commands, or stable `--json` output.
 
 ## Prerequisites
 
-- Windows PowerShell with access to Task Scheduler.
-- Python 3 available as `python` on `PATH`.
-- The `defuddle` executable available on `PATH` (or an explicit executable path in `config.toml`).
-- Network access to the configured feeds and article pages.
-- An Obsidian vault containing `Sources/Articles`.
+- Node.js 18 or newer, for `npx`/`bunx` and the bundled Defuddle dependency.
+- Python 3.11 or newer. OPMLark's core uses only the Python standard library.
+- Network access to the feeds and articles you subscribe to.
 
-Check the required executables before installing the schedule:
+## Quick start
 
-```powershell
-python --version
-defuddle --version
-Test-Path 'C:\Users\imhal\Documents\Traces\Sources\Articles'
+Create a workspace without installing anything globally:
+
+```sh
+mkdir my-reading
+cd my-reading
+npx -y opmlark init
+npx -y opmlark
 ```
 
-## Configuration and feeds
+Running `opmlark` without a command opens the terminal interface. Bun users can replace `npx -y` with `bunx`.
 
-Edit `config.toml` to set `vault_path`, `lookback_days`, and, when necessary, `defuddle_executable`. Bare executable names (such as `defuddle`) resolve through `PATH`; explicit relative paths resolve from the configuration file's directory.
+Add a feed non-interactively:
 
-Each `[[feed_catalogs]]` item selects one OPML file, gives it a stable `id`, and can set a default `folder` below `Sources/Articles`. Set `enabled = false` on a catalog or add its id to `feed_catalog.disabled_catalogs` to skip it. `feed_catalog.disabled_sources` skips a source id across all catalogs.
+```sh
+npx -y opmlark category add \
+  --catalog reading \
+  --name "Engineering/System Design"
 
-Each feed outline needs a stable `id` and `xmlUrl`. Set `enabled="false"` on an outline to skip only that source. A source-level `folder` overrides its catalog folder; otherwise the importer uses the catalog folder, then the feed/hostname fallback. Folders must be relative to `Sources/Articles` and cannot contain empty or traversal segments.
+npx -y opmlark feed add \
+  --catalog reading \
+  --category "Engineering/System Design" \
+  --id example-engineering \
+  --name "Example Engineering" \
+  --url "https://example.com/feed.xml"
 
-Example:
-
-```toml
-[[feed_catalogs]]
-id = "company-engineering"
-path = "feeds/company-engineering.opml"
-folder = "Company Engineering"
-enabled = true
+npx -y opmlark run --dry-run
+npx -y opmlark run
 ```
 
-```xml
-<outline id="uber-engineering" text="Uber Engineering"
-         xmlUrl="https://example.com/feed.xml"
-         folder="Company Engineering/Uber" />
+For regular use, install the command globally:
+
+```sh
+npm install --global opmlark
+opmlark doctor
+opmlark schedule install --time 07:00
 ```
 
-Verify every enabled endpoint before scheduling or after editing a catalog:
+The schedule command creates or updates a Windows Scheduled Task on Windows and an idempotent crontab entry on macOS and Linux. A global installation is recommended because scheduled jobs need a stable executable path.
 
-```powershell
-& .\run-import.ps1 --validate-catalogs
-```
+## Workspace
 
-Booking.com has a technical blog, but no public RSS/Atom endpoint was discoverable; Adyen and Mollie likewise have no verified technical feed endpoint. Uber Engineering publishes an RSS link but its endpoint currently rejects the importer's request. They are intentionally documented rather than enabled. The enabled Netherlands-focused sources are bol Techlab and Weaviate, whose public feeds validate successfully.
-
-## Rolling three-month lookback
-
-Every run considers visible entries from the trailing `lookback_days` window (set to 90 days in the supplied configuration), including when you add a new feed. Eligible URLs are Defuddled once; SQLite prevents repeat imports on later daily runs. Older visible entries are recorded as `seeded` and ignored.
-
-When a feed omits an article date, the importer uses its observation time so the article is eligible once. Its note records `publication_date_source: "observed"`; feed-provided timestamps use `publication_date_source: "feed"`.
-
-Preview a run without changing the SQLite state, creating notes, or updating operational logs. The summary reports entries that would be imported or retried:
-
-```powershell
-& .\run-import.ps1 --dry-run
-```
-
-Run the importer manually:
-
-```powershell
-& .\run-import.ps1
-```
-
-## Frontmatter migrations
-
-To add `type: article` to importer-created notes that predate the property:
-
-```powershell
-& .\run-import.ps1 --add-article-type
-```
-
-To add a missing topic only to legacy notes whose top-level frontmatter is exactly `type: article` (never importer-marked notes and never notes that already have a topic):
-
-```powershell
-& .\run-import.ps1 --add-topics
-```
-
-The topic migration uses title and tag keywords in this precedence: `Psychology (ADHD)`, `Algorithms and Data Structures`, `System Design`, `Finance`, `Science`, `Personal Development`, then `Software Engineering` as the fallback. Both migrations update YAML frontmatter only, preserve the article body, and are idempotent.
-
-## Daily schedule
-
-Install or update the idempotent daily task. It is named `OPML Defuddle Articles`, runs the project-local `run-import.ps1`, and is scheduled for local 07:00 with a 30-minute execution limit:
-
-```powershell
-& .\install-scheduled-task.ps1
-Get-ScheduledTask -TaskName 'OPML Defuddle Articles' | Format-List TaskName,State,Actions,Triggers
-```
-
-Re-run the installer after moving the project or changing its desired task configuration. To remove the task:
-
-```powershell
-Unregister-ScheduledTask -TaskName 'OPML Defuddle Articles' -Confirm:$false
-```
-
-## State, logs, and cleanup
-
-The importer keeps its state in `data/articles.sqlite3` and appends operational messages to `data/importer.log`. Both are local runtime data and ignored by Git.
-
-To locate imported notes in Obsidian, search:
+`opmlark init` creates only portable files:
 
 ```text
-ingested_by: opml-defuddle-articles
+my-reading/
+├── config.toml
+├── feeds/
+│   └── reading.opml
+├── articles/
+└── data/                    # generated runtime state
+    ├── articles.sqlite3
+    └── importer.log
 ```
+
+The runtime paths are `data/articles.sqlite3` and `data/importer.log`; neither belongs in version control.
+
+`config.toml` selects the Markdown output directory, lookback window, Defuddle executable, and one or more `feed_catalogs`:
+
+```toml
+[importer]
+output_path = "articles"
+defuddle_executable = "defuddle"
+lookback_days = 90
+max_attempts = 3
+
+[[feed_catalogs]]
+id = "reading"
+path = "feeds/reading.opml"
+folder = "Reading"
+```
+
+Each feed `outline` needs a stable `id` and `xmlUrl`. Nested outlines become categories:
+
+```xml
+<outline text="Engineering">
+  <outline text="System Design">
+    <outline id="example-engineering"
+             text="Example Engineering"
+             xmlUrl="https://example.com/feed.xml" />
+  </outline>
+</outline>
+```
+
+OPML is the canonical editable catalog. The TUI and commands modify it directly rather than hiding subscriptions in a private database.
+
+## Obsidian
+
+Obsidian is a preset, not a requirement. Point `output_path` at any directory inside a vault:
+
+```toml
+[importer]
+output_path = "C:/Users/you/Documents/My Vault/Sources/Articles"
+defuddle_executable = "defuddle"
+lookback_days = 90
+```
+
+The files can then sync, open, and receive annotations like any other Markdown notes.
+
+## Automation and AI
+
+All list, status, and mutation commands support JSON output:
+
+```sh
+opmlark status --json
+opmlark catalog list --json
+opmlark category list --json
+opmlark feed list --json
+opmlark run --dry-run --json
+```
+
+An AI workflow should first query this structured metadata, then read only the selected Markdown files. OPMLark does not generate or store summaries.
+
+## Ingestion behavior
+
+Every run considers visible entries inside `lookback_days`. SQLite prevents repeat imports. Entries older than the cutoff are recorded as seeded. Failed entries retry up to `max_attempts`, then remain visible for inspection instead of breaking every scheduled run forever.
+
+Undated entries use their first observation time and receive `publication_date_source: "observed"`. Feed timestamps use `publication_date_source: "feed"`.
+
+The generated frontmatter includes `type`, title, article URL, feed, category, dates, author when available, tags, and `ingested_by: opmlark`. The Defuddle Markdown body is written unchanged.
+
+## Commands
+
+```text
+opmlark                         Open the TUI
+opmlark init                    Create a workspace
+opmlark run [--dry-run]         Ingest or preview new articles
+opmlark status                  Show collection state
+opmlark doctor                  Check prerequisites
+opmlark catalog list            List OPML catalogs
+opmlark category list|add       Manage nested categories
+opmlark feed list|add|remove    Manage subscriptions
+opmlark failure list|retry      Inspect or explicitly retry failed articles
+opmlark schedule show|install|remove
+```
+
+## Existing checkout compatibility
+
+The original project layout remains supported. Existing `vault_path`, `feeds/`, `run-import.ps1`, `install-scheduled-task.ps1`, `--validate-catalogs`, and migration commands continue to work. Existing notes marked `ingested_by: opml-defuddle-articles` remain recognized; new notes use `ingested_by: opmlark`.
+
+The legacy scheduled task can still be removed with `Unregister-ScheduledTask`; new installations should use `opmlark schedule remove`.
+
+## Development
+
+```sh
+python -m unittest discover -v
+npm install
+npm run smoke
+npm pack --dry-run
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and [CONTEXT.md](CONTEXT.md) for the project language.
+
+## License
+
+MIT

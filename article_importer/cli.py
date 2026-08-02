@@ -1,0 +1,357 @@
+from __future__ import annotations
+
+import argparse
+from dataclasses import asdict
+from datetime import datetime, timezone
+import json
+import logging
+from pathlib import Path
+import shutil
+import sqlite3
+import sys
+import xml.etree.ElementTree as ElementTree
+
+from article_importer.configuration import ConfigurationError, load_config
+from article_importer.parsing import CatalogError, parse_catalogs
+from article_importer.service import ImportService
+from article_importer.scheduling import install_schedule, remove_schedule, schedule_info
+from article_importer.workspace import (
+    WorkspaceError,
+    add_category,
+    add_feed,
+    find_config,
+    initialize_workspace,
+    list_catalogs,
+    list_categories,
+    list_feeds,
+    list_failures,
+    remove_feed,
+    retry_failure,
+    to_json,
+    workspace_status,
+)
+
+
+def main(arguments: list[str] | None = None) -> int:
+    parser = _parser()
+    args = parser.parse_args(arguments)
+    if args.command is None:
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            from article_importer.tui import run_tui
+
+            return run_tui()
+        parser.print_help()
+        return 2
+    try:
+        return args.handler(args)
+    except (
+        CatalogError,
+        ConfigurationError,
+        WorkspaceError,
+        ElementTree.ParseError,
+        sqlite3.Error,
+        OSError,
+        ValueError,
+    ) as error:
+        if getattr(args, "json", False):
+            print(json.dumps({"ok": False, "error": str(error)}, ensure_ascii=False))
+        else:
+            print(f"ERROR: {error}", file=sys.stderr)
+        return 1
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="opmlark",
+        description="Watch OPML feeds and preserve new articles as clean Markdown.",
+    )
+    parser.add_argument("--version", action="version", version="OPMLark 0.1.0")
+    commands = parser.add_subparsers(dest="command")
+
+    init = commands.add_parser("init", help="Create a portable OPMLark workspace")
+    init.add_argument("path", nargs="?", type=Path, default=Path.cwd())
+    init.add_argument("--output", default="articles", help="Workspace-relative article directory")
+    _json_flag(init)
+    init.set_defaults(handler=_init)
+
+    run = commands.add_parser("run", help="Fetch feeds and ingest eligible articles")
+    _config_flag(run)
+    run.add_argument("--dry-run", action="store_true")
+    _json_flag(run)
+    run.set_defaults(handler=_run)
+
+    status = commands.add_parser("status", help="Show workspace and ingestion state")
+    _config_flag(status)
+    _json_flag(status)
+    status.set_defaults(handler=_status)
+
+    doctor = commands.add_parser("doctor", help="Check workspace prerequisites")
+    _config_flag(doctor)
+    _json_flag(doctor)
+    doctor.set_defaults(handler=_doctor)
+
+    schedule = commands.add_parser("schedule", help="Manage token-free background ingestion")
+    schedule_commands = schedule.add_subparsers(dest="schedule_command", required=True)
+    for name, handler in (
+        ("show", _schedule_show),
+        ("install", _schedule_install),
+        ("remove", _schedule_remove),
+    ):
+        command = schedule_commands.add_parser(name)
+        _config_flag(command)
+        if name != "remove":
+            command.add_argument("--time", default="07:00")
+        _json_flag(command)
+        command.set_defaults(handler=handler)
+
+    catalog = commands.add_parser("catalog", help="Manage OPML catalogs")
+    catalog_commands = catalog.add_subparsers(dest="catalog_command", required=True)
+    catalog_list = catalog_commands.add_parser("list")
+    _config_flag(catalog_list)
+    _json_flag(catalog_list)
+    catalog_list.set_defaults(handler=_catalog_list)
+
+    category = commands.add_parser("category", help="Manage OPML categories")
+    category_commands = category.add_subparsers(dest="category_command", required=True)
+    category_list = category_commands.add_parser("list")
+    _config_flag(category_list)
+    category_list.add_argument("--catalog")
+    _json_flag(category_list)
+    category_list.set_defaults(handler=_category_list)
+    category_add = category_commands.add_parser("add")
+    _config_flag(category_add)
+    category_add.add_argument("--catalog", required=True)
+    category_add.add_argument("--name", required=True)
+    _json_flag(category_add)
+    category_add.set_defaults(handler=_category_add)
+
+    feed = commands.add_parser("feed", help="Manage feed subscriptions")
+    feed_commands = feed.add_subparsers(dest="feed_command", required=True)
+    feed_list = feed_commands.add_parser("list")
+    _config_flag(feed_list)
+    _json_flag(feed_list)
+    feed_list.set_defaults(handler=_feed_list)
+    feed_add = feed_commands.add_parser("add")
+    _config_flag(feed_add)
+    feed_add.add_argument("--catalog", required=True)
+    feed_add.add_argument("--id", required=True)
+    feed_add.add_argument("--name", required=True)
+    feed_add.add_argument("--url", required=True)
+    feed_add.add_argument("--category", required=True)
+    feed_add.add_argument("--home-url")
+    feed_add.add_argument("--folder")
+    _json_flag(feed_add)
+    feed_add.set_defaults(handler=_feed_add)
+    feed_remove = feed_commands.add_parser("remove")
+    _config_flag(feed_remove)
+    feed_remove.add_argument("--id", required=True)
+    _json_flag(feed_remove)
+    feed_remove.set_defaults(handler=_feed_remove)
+
+    failure = commands.add_parser("failure", help="Inspect and retry failed articles")
+    failure_commands = failure.add_subparsers(dest="failure_command", required=True)
+    failure_list = failure_commands.add_parser("list")
+    _config_flag(failure_list)
+    _json_flag(failure_list)
+    failure_list.set_defaults(handler=_failure_list)
+    failure_retry = failure_commands.add_parser("retry")
+    _config_flag(failure_retry)
+    failure_retry.add_argument("--url", required=True)
+    _json_flag(failure_retry)
+    failure_retry.set_defaults(handler=_failure_retry)
+    return parser
+
+
+def _config_flag(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--config", type=Path, help="Path to config.toml")
+
+
+def _json_flag(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
+
+def _init(args: argparse.Namespace) -> int:
+    result = initialize_workspace(args.path, args.output)
+    _emit(result, args.json, lambda value: f"Created OPMLark workspace at {value['workspace']}")
+    return 0
+
+
+def _run(args: argparse.Namespace) -> int:
+    config_path = find_config(args.config)
+    config = load_config(config_path)
+    subscriptions = parse_catalogs(
+        config.feed_catalogs, disabled_sources=config.disabled_sources
+    )
+    data_path = config_path.parent / "data"
+    logger = _logger(None if args.dry_run else data_path / "importer.log")
+    progress = None if args.json else lambda message: print(message, flush=True)
+    try:
+        summary = ImportService(
+            config,
+            subscriptions,
+            data_path / "articles.sqlite3",
+            logger=logger,
+            progress=progress,
+        ).run(dry_run=args.dry_run)
+    finally:
+        _close_logger(logger)
+    result = asdict(summary)
+    result["ok"] = summary.failed_entries == 0 and summary.failed_feeds == 0
+    _emit(result, args.json, _summary_text)
+    return 0 if result["ok"] else 1
+
+
+def _status(args: argparse.Namespace) -> int:
+    result = workspace_status(find_config(args.config))
+    _emit(
+        result,
+        args.json,
+        lambda value: (
+            f"catalogs={value['catalogs']} feeds={value['feeds']} "
+            + " ".join(f"{key}={count}" for key, count in value["articles"].items())
+        ),
+    )
+    return 0
+
+
+def _doctor(args: argparse.Namespace) -> int:
+    config_path = find_config(args.config)
+    config = load_config(config_path)
+    checks = {
+        "python": sys.version.split()[0],
+        "defuddle": shutil.which(config.defuddle_executable) or config.defuddle_executable,
+        "config": str(config_path),
+        "output": str(config.articles_path),
+        "catalogs": len(config.feed_catalogs),
+    }
+    checks["ok"] = bool(shutil.which(config.defuddle_executable) or Path(config.defuddle_executable).is_file())
+    _emit(checks, args.json, lambda value: "\n".join(f"{key}: {item}" for key, item in value.items()))
+    return 0 if checks["ok"] else 1
+
+
+def _schedule_show(args: argparse.Namespace) -> int:
+    item = schedule_info(find_config(args.config), args.time)
+    _emit(item, args.json, lambda value: f"{value.name}\n{value.time}  {value.command}")
+    return 0
+
+
+def _schedule_install(args: argparse.Namespace) -> int:
+    item = install_schedule(find_config(args.config), args.time)
+    _emit(item, args.json, lambda value: f"Installed {value.name} at {value.time}")
+    return 0
+
+
+def _schedule_remove(args: argparse.Namespace) -> int:
+    item = remove_schedule(find_config(args.config))
+    _emit(item, args.json, lambda value: f"Removed {value.name}")
+    return 0
+
+
+def _catalog_list(args: argparse.Namespace) -> int:
+    items = list_catalogs(find_config(args.config))
+    _emit(items, args.json, lambda values: _table(values, ("id", "path", "folder", "enabled")))
+    return 0
+
+
+def _category_list(args: argparse.Namespace) -> int:
+    items = list_categories(find_config(args.config), args.catalog)
+    _emit(items, args.json, lambda values: _mapping_table(values, ("catalog", "category")))
+    return 0
+
+
+def _category_add(args: argparse.Namespace) -> int:
+    item = add_category(find_config(args.config), args.catalog, args.name)
+    _emit(item, args.json, lambda value: f"Added {value['category']} to {value['catalog']}")
+    return 0
+
+
+def _feed_list(args: argparse.Namespace) -> int:
+    items = list_feeds(find_config(args.config))
+    _emit(items, args.json, lambda values: _table(values, ("id", "name", "category", "catalog", "url")))
+    return 0
+
+
+def _feed_add(args: argparse.Namespace) -> int:
+    item = add_feed(
+        find_config(args.config),
+        catalog_id=args.catalog,
+        source_id=args.id,
+        name=args.name,
+        url=args.url,
+        category=args.category,
+        home_url=args.home_url,
+        folder=args.folder,
+    )
+    _emit(item, args.json, lambda value: f"Added feed {value.name} ({value.id})")
+    return 0
+
+
+def _feed_remove(args: argparse.Namespace) -> int:
+    item = remove_feed(find_config(args.config), args.id)
+    _emit(item, args.json, lambda value: f"Removed feed {value.name} ({value.id})")
+    return 0
+
+
+def _failure_list(args: argparse.Namespace) -> int:
+    items = list_failures(find_config(args.config))
+    _emit(
+        items,
+        args.json,
+        lambda values: _mapping_table(values, ("attempts", "updated", "url", "error")),
+    )
+    return 0
+
+
+def _failure_retry(args: argparse.Namespace) -> int:
+    item = retry_failure(find_config(args.config), args.url)
+    _emit(item, args.json, lambda value: f"Queued retry for {value['url']}")
+    return 0
+
+
+def _emit(value: object, as_json: bool, render: object) -> None:
+    print(to_json(value) if as_json else render(value))
+
+
+def _summary_text(value: dict[str, object]) -> str:
+    return " ".join(f"{key}={item}" for key, item in value.items() if key != "ok")
+
+
+def _table(values: tuple[object, ...], fields: tuple[str, ...]) -> str:
+    rows = [[str(getattr(value, field, "") or "") for field in fields] for value in values]
+    return _render_rows(fields, rows)
+
+
+def _mapping_table(values: tuple[dict[str, object], ...], fields: tuple[str, ...]) -> str:
+    return _render_rows(
+        fields,
+        [[str(value.get(field, "") or "") for field in fields] for value in values],
+    )
+
+
+def _render_rows(headers: tuple[str, ...], rows: list[list[str]]) -> str:
+    widths = [len(header) for header in headers]
+    for row in rows:
+        widths = [max(width, len(cell)) for width, cell in zip(widths, row)]
+    lines = ["  ".join(header.ljust(width) for header, width in zip(headers, widths))]
+    lines.extend("  ".join(cell.ljust(width) for cell, width in zip(row, widths)) for row in rows)
+    return "\n".join(lines)
+
+
+def _logger(path: Path | None) -> logging.Logger:
+    logger = logging.getLogger(f"opmlark.{datetime.now(timezone.utc).timestamp()}")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    if path is None:
+        logger.addHandler(logging.NullHandler())
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handler = logging.FileHandler(path, encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        logger.addHandler(handler)
+    return logger
+
+
+def _close_logger(logger: logging.Logger) -> None:
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+        handler.close()

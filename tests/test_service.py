@@ -75,7 +75,7 @@ class ImportServiceTests(unittest.TestCase):
         self.assertEqual(1, summary.imported)
         note = next(self.articles.rglob("Article - *.md"))
         self.assertEqual(self.articles / "Example", note.parent)
-        self.assertIn("ingested_by: opml-defuddle-articles", note.read_text(encoding="utf-8"))
+        self.assertIn("ingested_by: opmlark", note.read_text(encoding="utf-8"))
 
     def test_emits_progress_for_feed_and_imported_article(self) -> None:
         events: list[str] = []

@@ -41,6 +41,7 @@ class StateStore:
         cutoff: datetime | None = None,
         observed_at: datetime | None = None,
         dry_run: bool = False,
+        max_attempts: int | None = None,
     ) -> FeedBatch:
         """Return articles that should be imported for *subscription*.
 
@@ -50,7 +51,9 @@ class StateStore:
         observed_at = observed_at or datetime.now(timezone.utc)
         visible_entries = _unique_entries(entries)
         if dry_run:
-            return self._dry_run_candidates(subscription, visible_entries, cutoff, observed_at)
+            return self._dry_run_candidates(
+                subscription, visible_entries, cutoff, observed_at, max_attempts
+            )
 
         timestamp = _utc_timestamp()
         connection = self._mutable_connection()
@@ -102,7 +105,7 @@ class StateStore:
                 pending_urls: set[str] = set()
                 for entry in visible_entries:
                     row = connection.execute(
-                        "SELECT status, published, seen_at FROM entries WHERE feed_url = ? AND article_url = ?",
+                        "SELECT status, published, seen_at, attempts FROM entries WHERE feed_url = ? AND article_url = ?",
                         (subscription.feed_url, entry.url),
                     ).fetchone()
                     effective_entry = _effective_entry(entry, row, observed_at)
@@ -128,7 +131,11 @@ class StateStore:
                         if eligible:
                             candidates.append(effective_entry)
                             new_candidates += 1
-                    elif row[0] == "failed" and eligible:
+                    elif (
+                        row[0] == "failed"
+                        and eligible
+                        and (max_attempts is None or int(row[3]) < max_attempts)
+                    ):
                         candidates.append(effective_entry)
                         retry_candidates += 1
                     elif row[0] == "seeded" and eligible:
@@ -234,6 +241,7 @@ class StateStore:
         visible_entries: tuple[FeedEntry, ...],
         cutoff: datetime | None,
         observed_at: datetime,
+        max_attempts: int | None,
     ) -> FeedBatch:
         if not self._path.is_file():
             return _new_feed_batch(visible_entries, cutoff, observed_at)
@@ -265,13 +273,17 @@ class StateStore:
                 return FeedBatch(False, 0, candidates, len(candidates))
 
             has_pending_writes = "pending_writes" in tables
+            entry_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(entries)")
+            }
+            attempts_expression = "attempts" if "attempts" in entry_columns else "0"
             candidates: list[FeedEntry] = []
             new_candidates = 0
             retry_candidates = 0
             pending_urls: set[str] = set()
             for entry in visible_entries:
                 row = connection.execute(
-                    "SELECT status, published, seen_at FROM entries WHERE feed_url = ? AND article_url = ?",
+                    f"SELECT status, published, seen_at, {attempts_expression} FROM entries WHERE feed_url = ? AND article_url = ?",
                     (subscription.feed_url, entry.url),
                 ).fetchone()
                 effective_entry = _effective_entry(entry, row, observed_at)
@@ -279,7 +291,12 @@ class StateStore:
                 if row is None and eligible:
                     candidates.append(effective_entry)
                     new_candidates += 1
-                elif row is not None and row[0] == "failed" and eligible:
+                elif (
+                    row is not None
+                    and row[0] == "failed"
+                    and eligible
+                    and (max_attempts is None or int(row[3]) < max_attempts)
+                ):
                     candidates.append(effective_entry)
                     retry_candidates += 1
                 elif row is not None and row[0] == "seeded" and eligible:
@@ -328,6 +345,7 @@ class StateStore:
                 error_message TEXT,
                 seen_at TEXT,
                 updated_at TEXT,
+                attempts INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY(feed_url, article_url)
             );
             CREATE TABLE IF NOT EXISTS pending_writes(
@@ -338,6 +356,11 @@ class StateStore:
             );
             """
         )
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(entries)")}
+        if "attempts" not in columns:
+            connection.execute(
+                "ALTER TABLE entries ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0"
+            )
 
     def _record_outcome(
         self,
@@ -370,7 +393,12 @@ class StateStore:
                         THEN entries.error_message ELSE excluded.error_message END,
                     updated_at = CASE
                         WHEN entries.status = 'imported' AND excluded.status = 'failed'
-                        THEN entries.updated_at ELSE excluded.updated_at END
+                        THEN entries.updated_at ELSE excluded.updated_at END,
+                    attempts = CASE
+                        WHEN entries.status = 'imported' AND excluded.status = 'failed'
+                        THEN entries.attempts
+                        WHEN excluded.status = 'failed' THEN entries.attempts + 1
+                        ELSE 0 END
                 """,
                 (
                     feed_url,
