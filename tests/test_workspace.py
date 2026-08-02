@@ -28,6 +28,43 @@ from article_importer.workspace import (
 
 
 class WorkspaceTests(unittest.TestCase):
+    def test_init_never_overwrites_an_existing_workspace(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = Path(initialize_workspace(root)["config"])
+            original = config.read_bytes()
+
+            with self.assertRaisesRegex(WorkspaceError, "already exists"):
+                initialize_workspace(root)
+
+            self.assertEqual(original, config.read_bytes())
+
+    def test_catalog_rejects_paths_outside_workspace_before_writing(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory) / "workspace"
+            config = Path(initialize_workspace(root)["config"])
+
+            with self.assertRaisesRegex(WorkspaceError, "workspace-relative"):
+                add_catalog(config, catalog_id="escape", path_value="../escape.opml")
+
+            self.assertFalse((root.parent / "escape.opml").exists())
+
+    def test_enabling_catalog_removes_legacy_global_disable(self) -> None:
+        with TemporaryDirectory() as directory:
+            config = Path(initialize_workspace(Path(directory))["config"])
+            config.write_text(
+                config.read_text(encoding="utf-8").replace(
+                    "disabled_catalogs = []", 'disabled_catalogs = ["reading"]'
+                ),
+                encoding="utf-8",
+            )
+
+            enabled = enable_catalog(config, "reading")
+
+            self.assertTrue(enabled.enabled)
+            self.assertIn("disabled_catalogs = []", config.read_text(encoding="utf-8"))
+            self.assertTrue(list_catalogs(config)[0].enabled)
+
     def test_catalog_add_and_disable_preserve_opml_file(self) -> None:
         with TemporaryDirectory() as directory:
             config = Path(initialize_workspace(Path(directory))["config"])
@@ -83,6 +120,41 @@ class WorkspaceTests(unittest.TestCase):
             remove_category(config, "reading", "Engineering")
             self.assertEqual((), list_categories(config))
 
+    def test_nonempty_category_cannot_be_removed(self) -> None:
+        with TemporaryDirectory() as directory:
+            config = Path(initialize_workspace(Path(directory))["config"])
+            add_feed(
+                config,
+                catalog_id="reading",
+                feed_id="kept",
+                name="Kept",
+                url="https://example.test/feed.xml",
+                category="Engineering",
+            )
+
+            with self.assertRaisesRegex(WorkspaceError, "empty category"):
+                remove_category(config, "reading", "Engineering")
+
+            self.assertEqual("kept", list_feeds(config)[0].id)
+
+    def test_unicode_feed_metadata_round_trips_through_opml(self) -> None:
+        with TemporaryDirectory() as directory:
+            config = Path(initialize_workspace(Path(directory))["config"])
+
+            add_feed(
+                config,
+                catalog_id="reading",
+                feed_id="cafe-tech",
+                name='Café & "Engineering"',
+                url="https://example.test/feed?kind=one&lang=fr",
+                category="Ingénierie/Échelle",
+            )
+
+            feed = list_feeds(config)[0]
+            self.assertEqual('Café & "Engineering"', feed.name)
+            self.assertEqual("Ingénierie / Échelle", feed.category)
+            self.assertEqual("https://example.test/feed?kind=one&lang=fr", feed.url)
+
     def test_duplicate_feed_id_is_rejected_across_catalog(self) -> None:
         with TemporaryDirectory() as directory:
             config = Path(initialize_workspace(Path(directory))["config"])
@@ -109,6 +181,28 @@ class WorkspaceTests(unittest.TestCase):
             self.assertEqual(0, result)
             self.assertIn('"feeds": 0', output.getvalue())
             self.assertIn('"imported": 0', output.getvalue())
+
+    def test_cli_errors_have_stable_json_shape(self) -> None:
+        with TemporaryDirectory() as directory:
+            config = Path(initialize_workspace(Path(directory))["config"])
+            output = StringIO()
+
+            with redirect_stdout(output):
+                result = main(
+                    [
+                        "catalog",
+                        "add",
+                        "--config",
+                        str(config),
+                        "--id",
+                        "INVALID ID",
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(1, result)
+            self.assertIn('"ok": false', output.getvalue())
+            self.assertIn('"error":', output.getvalue())
 
     def test_schedule_show_uses_absolute_workspace_config(self) -> None:
         with TemporaryDirectory() as directory:

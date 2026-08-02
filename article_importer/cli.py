@@ -11,6 +11,7 @@ import sqlite3
 import sys
 import xml.etree.ElementTree as ElementTree
 
+from article_importer import __version__
 from article_importer.configuration import ConfigurationError, load_config
 from article_importer.library import LibraryError, list_articles, read_article, search_articles
 from article_importer.parsing import CatalogError, parse_catalogs
@@ -72,7 +73,7 @@ def _parser() -> argparse.ArgumentParser:
         prog="opmlark",
         description="Watch OPML feeds and preserve new articles as clean Markdown.",
     )
-    parser.add_argument("--version", action="version", version="OPMLark 0.1.0")
+    parser.add_argument("--version", action="version", version=f"OPMLark {__version__}")
     commands = parser.add_subparsers(dest="command")
 
     init = commands.add_parser("init", help="Create a portable OPMLark workspace")

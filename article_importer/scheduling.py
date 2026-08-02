@@ -26,14 +26,28 @@ def schedule_info(config_path: Path, time: str = "07:00") -> ScheduleInfo:
         raise WorkspaceError(
             "Scheduling requires a stable global command; run `npm install --global opmlark` first"
         )
-    command = f'{_quote(executable)} run --config {_quote(str(config_path.resolve()))}'
-    name = f"OPMLark - {config_path.parent.name}"
-    return ScheduleInfo("windows" if os.name == "nt" else "cron", name, f"{hour:02d}:{minute:02d}", command)
+    if _is_temporary_npx_path(executable):
+        raise WorkspaceError(
+            "Scheduling cannot use a temporary npx command; run `npm install --global opmlark` first"
+        )
+    arguments = f'run --config {_quote(str(config_path.resolve()))}'
+    if _is_windows() and Path(executable).suffix.lower() in {".cmd", ".bat"}:
+        command = f'cmd.exe /D /C ""{executable}" {arguments}"'
+    else:
+        command = f"{_quote(executable)} {arguments}"
+    digest = hashlib.sha256(str(config_path.resolve()).encode()).hexdigest()[:8]
+    name = f"OPMLark - {config_path.parent.name} - {digest}"
+    return ScheduleInfo(
+        "windows" if _is_windows() else "cron",
+        name,
+        f"{hour:02d}:{minute:02d}",
+        command,
+    )
 
 
 def install_schedule(config_path: Path, time: str = "07:00") -> ScheduleInfo:
     info = schedule_info(config_path, time)
-    if os.name == "nt":
+    if _is_windows():
         result = subprocess.run(
             [
                 "schtasks.exe",
@@ -61,6 +75,7 @@ def install_schedule(config_path: Path, time: str = "07:00") -> ScheduleInfo:
     retained = [line for line in current.splitlines() if marker not in line]
     hour, minute = _time_parts(time)
     log_path = config_path.parent / "data" / "scheduler.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     line = f"{minute} {hour} * * * {info.command} >> {_quote(str(log_path))} 2>&1 {marker}"
     contents = "\n".join(retained + [line]).strip() + "\n"
     _write_crontab(contents)
@@ -69,7 +84,7 @@ def install_schedule(config_path: Path, time: str = "07:00") -> ScheduleInfo:
 
 def remove_schedule(config_path: Path) -> ScheduleInfo:
     info = schedule_info(config_path)
-    if os.name == "nt":
+    if _is_windows():
         result = subprocess.run(
             ["schtasks.exe", "/Delete", "/TN", info.name, "/F"],
             capture_output=True,
@@ -119,6 +134,15 @@ def _write_crontab(contents: str) -> None:
 
 
 def _quote(value: str) -> str:
-    if os.name == "nt":
+    if _is_windows():
         return f'"{value}"' if " " in value else value
     return shlex.quote(value)
+
+
+def _is_temporary_npx_path(value: str) -> bool:
+    normalized = value.replace("\\", "/").casefold()
+    return "/_npx/" in normalized or "/npm-cache/_npx/" in normalized
+
+
+def _is_windows() -> bool:
+    return os.name == "nt"

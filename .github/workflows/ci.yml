@@ -26,5 +26,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: python -m unittest discover -v
+      - run: npm run test:node
       - run: npm run smoke
       - run: npm pack --dry-run

@@ -36,6 +36,76 @@ NEW = FeedEntry(
 
 
 class StateStoreTests(unittest.TestCase):
+    def test_legacy_database_dry_run_and_attempt_migration_are_safe(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "state.sqlite3"
+            connection = sqlite3.connect(path)
+            connection.executescript(
+                """
+                CREATE TABLE feeds(
+                    feed_url TEXT PRIMARY KEY, name TEXT, topic TEXT, initialized_at TEXT
+                );
+                CREATE TABLE entries(
+                    feed_url TEXT, article_url TEXT, title TEXT, published TEXT,
+                    status TEXT, output_path TEXT, error_message TEXT,
+                    seen_at TEXT, updated_at TEXT,
+                    PRIMARY KEY(feed_url, article_url)
+                );
+                CREATE TABLE pending_writes(
+                    feed_url TEXT, article_url TEXT, started_at TEXT,
+                    PRIMARY KEY(feed_url, article_url)
+                );
+                """
+            )
+            connection.execute(
+                "INSERT INTO feeds VALUES (?, ?, ?, ?)",
+                (SUBSCRIPTION.feed_url, SUBSCRIPTION.name, SUBSCRIPTION.topic, "now"),
+            )
+            connection.execute(
+                "INSERT INTO entries VALUES (?, ?, ?, ?, 'failed', NULL, 'old error', 'now', 'now')",
+                (
+                    SUBSCRIPTION.feed_url,
+                    ENTRY.url,
+                    ENTRY.title,
+                    ENTRY.published.isoformat(),
+                ),
+            )
+            connection.commit()
+            connection.close()
+
+            with StateStore(path) as state:
+                preview = state.candidates(
+                    SUBSCRIPTION, [ENTRY], dry_run=True, max_attempts=3
+                )
+            before_connection = sqlite3.connect(path)
+            try:
+                before_columns = {
+                    row[1]
+                    for row in before_connection.execute("PRAGMA table_info(entries)")
+                }
+            finally:
+                before_connection.close()
+            with StateStore(path) as state:
+                committed = state.candidates(SUBSCRIPTION, [ENTRY], max_attempts=3)
+            after_connection = sqlite3.connect(path)
+            try:
+                after_columns = {
+                    row[1]
+                    for row in after_connection.execute("PRAGMA table_info(entries)")
+                }
+                preserved = after_connection.execute(
+                    "SELECT status, error_message FROM entries WHERE article_url = ?",
+                    (ENTRY.url,),
+                ).fetchone()
+            finally:
+                after_connection.close()
+
+            self.assertEqual((ENTRY,), preview.candidates)
+            self.assertNotIn("attempts", before_columns)
+            self.assertEqual((ENTRY,), committed.candidates)
+            self.assertIn("attempts", after_columns)
+            self.assertEqual(("failed", "old error"), preserved)
+
     def test_failed_entry_stops_retrying_after_attempt_budget(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "state.sqlite3"

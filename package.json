@@ -16,7 +16,7 @@
   },
   "files": [
     "article_importer/**/*.py",
-    "bin/opmlark.js",
+    "bin/*.js",
     "CHANGELOG.md",
     "CONTEXT.md",
     "CONTRIBUTING.md",
@@ -26,6 +26,7 @@
   ],
   "scripts": {
     "test": "python -m unittest discover -v",
+    "test:node": "node --test tests/*.test.mjs",
     "smoke": "node bin/opmlark.js --version"
   },
   "dependencies": {

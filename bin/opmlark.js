@@ -3,6 +3,7 @@
 import { delimiter, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { isSupportedPythonVersion } from "./python-version.js";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const localBins = [
@@ -34,10 +35,7 @@ for (const [command, prefix] of candidates) {
     windowsHide: true,
   });
   const versionText = `${check.stdout ?? ""} ${check.stderr ?? ""}`;
-  const match = versionText.match(/Python\s+(\d+)\.(\d+)/i);
-  const supported =
-    match && (Number(match[1]) > 3 || (Number(match[1]) === 3 && Number(match[2]) >= 11));
-  if (check.status === 0 && supported) {
+  if (check.status === 0 && isSupportedPythonVersion(versionText)) {
     selected = [command, prefix];
     break;
   }

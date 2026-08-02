@@ -23,15 +23,17 @@ jobs:
           cache: npm
       - run: npm ci
       - run: python -m unittest discover -v
+      - run: npm run test:node
       - run: npm run smoke
       - name: Verify tag matches package version
         shell: bash
         run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
-      - name: Publish npm package
-        run: npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Create GitHub release
-        run: gh release create "$GITHUB_REF_NAME" --generate-notes --title "OPMLark $GITHUB_REF_NAME"
+        run: gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --generate-notes --title "OPMLark $GITHUB_REF_NAME"
         env:
           GH_TOKEN: ${{ github.token }}
+      - name: Publish npm package
+        shell: bash
+        run: npm view "opmlark@$(node -p "require('./package.json').version")" version >/dev/null 2>&1 || npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
