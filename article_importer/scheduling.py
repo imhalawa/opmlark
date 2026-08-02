@@ -390,9 +390,12 @@ def _apply_launchd(config_path: Path) -> tuple[ScheduleChange, ...]:
             if schedule.enabled:
                 payload = launchd_plist(config_path, schedule, info)
                 existed = path.exists()
-                _atomic_bytes(path, payload)
-                _launchctl_reload(path, info.name)
-                changes.append(ScheduleChange(schedule.id, "updated" if existed else "created"))
+                if existed and path.read_bytes() == payload:
+                    changes.append(ScheduleChange(schedule.id, "unchanged"))
+                else:
+                    _atomic_bytes(path, payload)
+                    _launchctl_reload(path, info.name)
+                    changes.append(ScheduleChange(schedule.id, "updated" if existed else "created"))
             elif path.exists():
                 _launchctl_remove(path, info.name)
                 changes.append(ScheduleChange(schedule.id, "removed"))
@@ -461,25 +464,42 @@ def _windows_task_matches(name: str, info: ScheduleInfo, schedule: Schedule) -> 
     actual_action = f"{command} {arguments}".strip().casefold()
     if info.command.casefold() not in actual_action and actual_action not in info.command.casefold():
         return False
-    tags = {_local_name(element.tag) for element in elements}
     if schedule.frequency == "daily":
-        return "ScheduleByDay" in tags
+        daily = _first_element(elements, "ScheduleByDay")
+        return daily is not None and _child_text(daily, "DaysInterval") == "1"
     if schedule.frequency == "weekly":
         day_names = {
             "mon": "Monday", "tue": "Tuesday", "wed": "Wednesday",
             "thu": "Thursday", "fri": "Friday", "sat": "Saturday", "sun": "Sunday",
         }
-        return "ScheduleByWeek" in tags and {
-            day_names[day] for day in schedule.days
-        }.issubset(tags)
-    if schedule.frequency == "monthly":
-        days = {
-            element.text
-            for element in elements
-            if _local_name(element.tag) == "Day"
+        weekly = _first_element(elements, "ScheduleByWeek")
+        if weekly is None or _child_text(weekly, "WeeksInterval") != "1":
+            return False
+        weekdays = _first_element(list(weekly.iter()), "DaysOfWeek")
+        actual_days = set() if weekdays is None else {
+            _local_name(child.tag) for child in weekdays
         }
-        return "ScheduleByMonth" in tags and str(schedule.day) in days
-    return "TimeTrigger" in tags and boundary.startswith(f"{schedule.date}T")
+        return actual_days == {day_names[day] for day in schedule.days}
+    if schedule.frequency == "monthly":
+        monthly = _first_element(elements, "ScheduleByMonth")
+        if monthly is None:
+            return False
+        days_parent = _first_element(list(monthly.iter()), "DaysOfMonth")
+        actual_days = set() if days_parent is None else {
+            (child.text or "").strip()
+            for child in days_parent
+            if _local_name(child.tag) == "Day"
+        }
+        months_parent = _first_element(list(monthly.iter()), "Months")
+        actual_months = set() if months_parent is None else {
+            _local_name(child.tag) for child in months_parent
+        }
+        all_months = {
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December",
+        }
+        return actual_days == {str(schedule.day)} and actual_months == all_months
+    return _first_element(elements, "TimeTrigger") is not None and boundary.startswith(f"{schedule.date}T")
 
 
 def _launchd_managed(config_path: Path) -> dict[str, Path]:
@@ -622,6 +642,17 @@ def _lines(lines: list[str]) -> str:
 
 def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
+
+
+def _first_element(
+    elements: list[ElementTree.Element], name: str
+) -> ElementTree.Element | None:
+    return next((element for element in elements if _local_name(element.tag) == name), None)
+
+
+def _child_text(parent: ElementTree.Element, name: str) -> str:
+    child = _first_element(list(parent), name)
+    return "" if child is None else (child.text or "").strip()
 
 
 def _quote(value: str) -> str:

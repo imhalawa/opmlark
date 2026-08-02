@@ -269,7 +269,7 @@ class SchedulingReconciliationTests(unittest.TestCase):
         )
         xml = """<Task xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
           <Triggers><CalendarTrigger><StartBoundary>2026-08-02T09:30:00</StartBoundary>
-          <ScheduleByWeek><DaysOfWeek><Saturday/><Sunday/></DaysOfWeek></ScheduleByWeek>
+          <ScheduleByWeek><WeeksInterval>1</WeeksInterval><DaysOfWeek><Saturday/><Sunday/></DaysOfWeek></ScheduleByWeek>
           </CalendarTrigger></Triggers><Actions><Exec><Command>cmd.exe</Command>
           <Arguments>/D /C "opmlark run --config C:\\workspace\\config.toml"</Arguments>
           </Exec></Actions></Task>"""
@@ -283,6 +283,14 @@ class SchedulingReconciliationTests(unittest.TestCase):
                     Schedule("weekend", "weekly", "10:30", days=("sat", "sun")),
                 )
             )
+
+        extra_day_xml = xml.replace("<Saturday/>", "<Monday/><Saturday/>")
+        wrong_interval_xml = xml.replace("<WeeksInterval>1", "<WeeksInterval>2")
+        for changed in (extra_day_xml, wrong_interval_xml):
+            with self.subTest():
+                result = type("Result", (), {"returncode": 0, "stdout": changed})()
+                with patch("article_importer.scheduling.subprocess.run", return_value=result):
+                    self.assertFalse(_windows_task_matches("OPMLark task", info, schedule))
 
     def test_cron_apply_returns_failed_changes_when_crontab_cannot_be_read(self) -> None:
         with TemporaryDirectory() as directory:
@@ -364,6 +372,27 @@ class SchedulingReconciliationTests(unittest.TestCase):
             reload.assert_called_once()
             remove.assert_called_once()
             self.assertEqual({"morning": "created", "stale": "removed"}, {item.id: item.action for item in changes})
+
+    def test_launchd_apply_reports_identical_plist_unchanged_without_reload(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = Path(initialize_workspace(root / "workspace")["config"])
+            agents = root / "LaunchAgents"
+            agents.mkdir()
+            schedule = Schedule("morning", "daily", "07:00")
+            add_schedule_config(config, schedule)
+            with (
+                patch("article_importer.scheduling._platform", return_value="launchd"),
+                patch("article_importer.scheduling.shutil.which", return_value="/usr/local/bin/opmlark"),
+                patch("article_importer.scheduling._launchd_directory", return_value=agents),
+            ):
+                info = schedule_info(config, schedule)
+                (agents / f"{info.name}.plist").write_bytes(launchd_plist(config, schedule, info))
+                with patch("article_importer.scheduling._launchctl_reload") as reload:
+                    changes = apply_schedules(config)
+
+            self.assertEqual("unchanged", changes[0].action)
+            reload.assert_not_called()
 
 
 if __name__ == "__main__":
