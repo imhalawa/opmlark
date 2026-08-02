@@ -199,7 +199,9 @@ def schedule_status(config_path: Path) -> tuple[ScheduleChange, ...]:
                 expected = launchd_plist(config_path, schedule, schedule_info(config_path, schedule))
                 path = current.get(schedule.id)
                 action = "missing" if path is None else (
-                    "installed" if path.read_bytes() == expected else "drifted"
+                    "installed"
+                    if path.read_bytes() == expected and _launchctl_loaded(path.stem)
+                    else "drifted"
                 )
             statuses.append(ScheduleChange(schedule.id, action))
         statuses.extend(
@@ -390,7 +392,7 @@ def _apply_launchd(config_path: Path) -> tuple[ScheduleChange, ...]:
             if schedule.enabled:
                 payload = launchd_plist(config_path, schedule, info)
                 existed = path.exists()
-                if existed and path.read_bytes() == payload:
+                if existed and path.read_bytes() == payload and _launchctl_loaded(info.name):
                     changes.append(ScheduleChange(schedule.id, "unchanged"))
                 else:
                     _atomic_bytes(path, payload)
@@ -558,6 +560,16 @@ def _launchctl_reload(path: Path, label: str) -> None:
         check=False,
     )
     _run_checked(["launchctl", "bootstrap", domain, str(path)])
+
+
+def _launchctl_loaded(label: str) -> bool:
+    domain = f"gui/{os.getuid()}"
+    return subprocess.run(
+        ["launchctl", "print", f"{domain}/{label}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).returncode == 0
 
 
 def _launchctl_remove(path: Path, label: str) -> None:

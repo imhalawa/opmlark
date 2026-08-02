@@ -388,11 +388,38 @@ class SchedulingReconciliationTests(unittest.TestCase):
             ):
                 info = schedule_info(config, schedule)
                 (agents / f"{info.name}.plist").write_bytes(launchd_plist(config, schedule, info))
-                with patch("article_importer.scheduling._launchctl_reload") as reload:
+                with (
+                    patch("article_importer.scheduling._launchctl_loaded", return_value=True),
+                    patch("article_importer.scheduling._launchctl_reload") as reload,
+                ):
                     changes = apply_schedules(config)
 
             self.assertEqual("unchanged", changes[0].action)
             reload.assert_not_called()
+
+    def test_launchd_apply_reloads_identical_plist_when_agent_is_unloaded(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = Path(initialize_workspace(root / "workspace")["config"])
+            agents = root / "LaunchAgents"
+            agents.mkdir()
+            schedule = Schedule("morning", "daily", "07:00")
+            add_schedule_config(config, schedule)
+            with (
+                patch("article_importer.scheduling._platform", return_value="launchd"),
+                patch("article_importer.scheduling.shutil.which", return_value="/usr/local/bin/opmlark"),
+                patch("article_importer.scheduling._launchd_directory", return_value=agents),
+            ):
+                info = schedule_info(config, schedule)
+                (agents / f"{info.name}.plist").write_bytes(launchd_plist(config, schedule, info))
+                with (
+                    patch("article_importer.scheduling._launchctl_loaded", return_value=False),
+                    patch("article_importer.scheduling._launchctl_reload") as reload,
+                ):
+                    changes = apply_schedules(config)
+
+            self.assertEqual("updated", changes[0].action)
+            reload.assert_called_once()
 
 
 if __name__ == "__main__":
