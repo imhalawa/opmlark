@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -17,6 +18,7 @@ class RunnerScriptTests(unittest.TestCase):
         self.assertIn("$env:APPDATA", contents)
         self.assertIn("defuddle.cmd", contents)
 
+    @unittest.skipUnless(os.name == "nt", "PowerShell runner is Windows-specific")
     def test_runner_forwards_arguments_and_python_exit_code(self) -> None:
         runner = PROJECT_ROOT / "run-import.ps1"
         self.assertTrue(runner.exists(), "The project runner must exist")
